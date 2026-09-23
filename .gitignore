@@ -1,0 +1,7 @@
+src/.ipynb_checkpoints/
+src/__pycache__/
+src/stories/
+src/.env.config
+src/.env.secrets
+src/unload_dummy.png
+src/Untitled.ipynb

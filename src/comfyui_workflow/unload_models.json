@@ -1,0 +1,27 @@
+{
+  "1": {
+    "inputs": {
+      "image": "unload_dummy.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "2": {
+    "inputs": {
+      "value": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "UnloadAllModels"
+  },
+  "3": {
+    "inputs": {
+      "images": [
+        "2",
+        0
+      ],
+      "filename_prefix": "unload_dummy"
+    },
+    "class_type": "SaveImage"
+  }
+}

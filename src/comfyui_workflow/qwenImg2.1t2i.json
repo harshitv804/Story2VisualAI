@@ -1,0 +1,135 @@
+{
+  "462": {
+    "inputs": {
+      "value": ""
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Text"
+    }
+  },
+  "463": {
+    "inputs": {
+      "filename_prefix": "",
+      "folder": "",
+      "overwrite_warning": false,
+      "include_metadata": false,
+      "extension": "png",
+      "quality": 100,
+      "images": [
+        "459_457",
+        0
+      ],
+      "filename_opt": [
+        "462",
+        0
+      ]
+    },
+    "class_type": "> Save Image",
+    "_meta": {
+      "title": "😼> Save Image"
+    }
+  },
+  "459_451": {
+    "inputs": {
+      "unet_name": "qwen_image_2.1_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "459_453": {
+    "inputs": {
+      "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "459_454": {
+    "inputs": {
+      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "459_456": {
+    "inputs": {
+      "width": 736,
+      "height": 1280,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "459_452": {
+    "inputs": {
+      "prompt": "",
+      "negative_prompt": "",
+      "resolution": 1024,
+      "clip": [
+        "459_453",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImage21",
+    "_meta": {
+      "title": "Text Encode Qwen Image 2.1"
+    }
+  },
+  "459_458": {
+    "inputs": {
+      "seed": 447523777354946,
+      "steps": 30,
+      "cfg": 2,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "459_451",
+        0
+      ],
+      "positive": [
+        "459_452",
+        0
+      ],
+      "negative": [
+        "459_452",
+        1
+      ],
+      "latent_image": [
+        "459_456",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "459_457": {
+    "inputs": {
+      "samples": [
+        "459_458",
+        0
+      ],
+      "vae": [
+        "459_454",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  }
+}
