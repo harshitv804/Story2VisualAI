@@ -1,7 +1,9 @@
-src/.ipynb_checkpoints/
-src/__pycache__/
+.ipynb_checkpoints/
 src/stories/
-src/.env.config
-src/.env.secrets
-src/unload_dummy.png
-src/Untitled.ipynb
+.env.config
+.env.secrets
+unload_dummy.png
+Untitled.ipynb
+__pycache__/
+*.py[cod]
+src/prompts copy/

@@ -69,7 +69,7 @@ async def generate_meta_stage1(
     replace: bool = False,
     check_existing: bool = True,
     save_output: bool = True,
-    dependent_paths: list[Path] | None = None
+    dependent_paths: list[Path] | None = None,
 ):
     print()
     print(f"[STEP] Generate {name}:")
@@ -509,6 +509,100 @@ def generate_meta_images(
             gc.collect()
 
 
+# def generate_final_scene_images(
+#     final_image_prompts,
+#     character_meta,
+#     image_params,
+#     generated_final_images_dir,
+#     generated_char_images_dir,
+#     generated_world_images_dir,
+#     generated_temp_images_dir,
+# ):
+#
+#     image_width, image_height, image_guidance, image_steps = image_params
+#
+#     # char_id -> Character
+#     characters = {char.char_id: char for char in (character_meta.characters or [])}
+#
+#     for item in final_image_prompts.results:
+#         subscene_id = item.subscene_id
+#         char_ids = item.char_ids or []
+#         world_id = item.world_id
+#         prompt_text = item.image_prompt.image_prompt
+#
+#         final_image_path = generated_final_images_dir / f"{subscene_id}.png"
+#
+#         if final_image_path.exists():
+#             print()
+#             print(f"[FINAL] Skipping {subscene_id} (already exists)")
+#             continue
+#
+#         try:
+#             char_data_for_layout = []
+#
+#             for cid in char_ids:
+#                 char = characters.get(cid)
+#
+#                 if char is None:
+#                     print()
+#                     print(f"[FINAL-WARN] Character {cid} not found for {subscene_id}")
+#                     continue
+#
+#                 img_path = generated_char_images_dir / f"{cid}.png"
+#
+#                 if not img_path.exists():
+#                     print()
+#                     print(f"[FINAL-WARN] Character image missing: {img_path}")
+#                     continue
+#
+#                 char_data_for_layout.append(
+#                     {
+#                         "image": img_path,
+#                         "name": char.name,
+#                         "id": char.char_id,
+#                     }
+#                 )
+#
+#             layout_path = create_image_layout(
+#                 char_data_for_layout,
+#                 generated_temp_images_dir,
+#             )
+#             print()
+#             print(f"[FINAL] Layout created for {subscene_id}: {layout_path}")
+#
+#             world_image_path = generated_world_images_dir / f"{world_id}.png"
+#
+#             if not world_image_path.exists():
+#                 print()
+#                 print(f"[FINAL-WARN] World image missing: {world_image_path}")
+#                 continue
+#
+#             print(f"[FINAL] World image: {world_image_path}")
+#
+#             generate_image_to_image(
+#                 prompt=prompt_text,
+#                 image_1=layout_path,
+#                 image_2=world_image_path,
+#                 output_path=final_image_path,
+#                 image_id=subscene_id,
+#                 width=image_width,
+#                 height=image_height,
+#                 cfg=image_guidance,
+#                 steps=image_steps,
+#             )
+#             print(f"[FINAL-SAVED] {subscene_id} -> '{final_image_path}'")
+#             print()
+#
+#         except Exception as e:
+#             print()
+#             print(f"[FINAL-ERROR] {subscene_id} failed: {e}")
+#
+#         finally:
+#             gc.collect()
+#
+#     unload_models()
+
+
 def generate_final_scene_images(
     final_image_prompts,
     character_meta,
@@ -538,6 +632,10 @@ def generate_final_scene_images(
             continue
 
         try:
+            # ==================================================
+            # BUILD CHARACTER DATA
+            # ==================================================
+
             char_data_for_layout = []
 
             for cid in char_ids:
@@ -563,12 +661,33 @@ def generate_final_scene_images(
                     }
                 )
 
-            layout_path = create_image_layout(
+            # ==================================================
+            # CREATE CHARACTER LAYOUTS
+            #
+            # 1-3 characters:
+            #
+            #   layout_paths[0] = characters 1-3
+            #   layout_paths[1] = white placeholder
+            #
+            # 4-6 characters:
+            #
+            #   layout_paths[0] = characters 1-3
+            #   layout_paths[1] = characters 4-6
+            # ==================================================
+
+            char_layout_1, char_layout_2 = create_image_layout(
                 char_data_for_layout,
                 generated_temp_images_dir,
             )
+
             print()
-            print(f"[FINAL] Layout created for {subscene_id}: {layout_path}")
+            print(f"[FINAL] Character layout 1: {char_layout_1}")
+
+            print(f"[FINAL] Character layout 2: {char_layout_2}")
+
+            # ==================================================
+            # WORLD IMAGE
+            # ==================================================
 
             world_image_path = generated_world_images_dir / f"{world_id}.png"
 
@@ -579,10 +698,18 @@ def generate_final_scene_images(
 
             print(f"[FINAL] World image: {world_image_path}")
 
+            # ==================================================
+            # GENERATE FINAL IMAGE
+            # ==================================================
+
             generate_image_to_image(
                 prompt=prompt_text,
-                image_1=layout_path,
-                image_2=world_image_path,
+                # Character layout 1
+                char_layout_1=char_layout_1,
+                # Character layout 2
+                char_layout_2=char_layout_2,
+                # World image
+                world_image=world_image_path,
                 output_path=final_image_path,
                 image_id=subscene_id,
                 width=image_width,
@@ -590,7 +717,9 @@ def generate_final_scene_images(
                 cfg=image_guidance,
                 steps=image_steps,
             )
+
             print(f"[FINAL-SAVED] {subscene_id} -> '{final_image_path}'")
+
             print()
 
         except Exception as e:

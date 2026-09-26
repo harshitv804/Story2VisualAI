@@ -17,6 +17,15 @@
       "title": "Load Image"
     }
   },
+  "480": {
+    "inputs": {
+      "image": ""
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image 2"
+    }
+  },
   "478": {
     "inputs": {
       "filename_prefix": "",
@@ -107,7 +116,7 @@
     "inputs": {
       "prompt": "",
       "negative_prompt": "",
-      "resolution": 0,
+      "resolution": 1024,
       "clip": [
         "459_453",
         0
@@ -117,6 +126,10 @@
         0
       ],
       "images.image_2": [
+        "480",
+        0
+      ],
+      "images.image_3": [
         "470",
         0
       ],
@@ -132,7 +145,7 @@
   },
   "459_458": {
     "inputs": {
-      "seed": 661490572772576,
+      "seed": 813640593,
       "steps": 25,
       "cfg": 2,
       "sampler_name": "euler",

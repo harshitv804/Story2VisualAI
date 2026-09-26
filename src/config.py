@@ -1,17 +1,9 @@
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv(".env.secrets")
 load_dotenv(".env.config")
-
-LLM_API_KEY = os.getenv("LLM_API_KEY")
-LLM_API_BASE_URL = os.getenv("LLM_API_BASE_URL")
-LLM_API_MODEL_ID = os.getenv("LLM_API_MODEL_ID")
-
-COMFY_URL = os.getenv("COMFY_URL")
-T2I_WORKFLOW_FILE = os.getenv("T2I_WORKFLOW_FILE")
-I2I_WORKFLOW_FILE = os.getenv("I2I_WORKFLOW_FILE")
-UNLOAD_WORKFLOW_FILE = os.getenv("UNLOAD_WORKFLOW_FILE")
 
 if not os.getenv("LLM_API_KEY"):
     raise ValueError("LLM_API_KEY is not set")
@@ -33,3 +25,12 @@ if not os.getenv("I2I_WORKFLOW_FILE"):
 
 if not os.getenv("UNLOAD_WORKFLOW_FILE"):
     raise ValueError("UNLOAD_WORKFLOW_FILE is not set")
+
+LLM_API_KEY = os.getenv("LLM_API_KEY")
+LLM_API_BASE_URL = os.getenv("LLM_API_BASE_URL")
+LLM_API_MODEL_ID = os.getenv("LLM_API_MODEL_ID")
+
+COMFY_URL = os.getenv("COMFY_URL")
+T2I_WORKFLOW_FILE = os.getenv("T2I_WORKFLOW_FILE")
+I2I_WORKFLOW_FILE = os.getenv("I2I_WORKFLOW_FILE")
+UNLOAD_WORKFLOW_FILE = os.getenv("UNLOAD_WORKFLOW_FILE")

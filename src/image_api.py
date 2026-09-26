@@ -34,34 +34,72 @@ def submit_workflow(workflow):
     return prompt_id
 
 
-def wait_for_completion(prompt_id):
-    while True:
-        response = requests.get(
-            f"{COMFY_URL}/history/{prompt_id}",
-            timeout=30,
+def interrupt_comfyui():
+    """Interrupt the currently running ComfyUI job."""
+    try:
+        response = requests.post(
+            f"{COMFY_URL}/interrupt",
+            timeout=10,
         )
-
         response.raise_for_status()
+        print("[IMAGE-GEN] ComfyUI job interrupted")
+    except requests.RequestException as e:
+        print(f"[IMAGE-GEN] Failed to interrupt ComfyUI: {e}")
 
-        history = response.json()
 
-        if prompt_id in history:
-            result = history[prompt_id]
+def wait_for_completion(prompt_id):
+    try:
+        while True:
+            response = requests.get(
+                f"{COMFY_URL}/history/{prompt_id}",
+                timeout=30,
+            )
 
-            status = result.get("status", {})
+            response.raise_for_status()
 
-            if status.get("status_str") == "error":
-                raise RuntimeError(result)
+            history = response.json()
 
-            if result.get("outputs"):
-                return result
+            if prompt_id in history:
+                result = history[prompt_id]
 
-            # Some workflows may have no useful image output.
-            # In that case, completed status is enough.
-            if status.get("completed") is True:
-                return result
+                status = result.get("status", {})
 
-        time.sleep(1)
+                # ComfyUI reported an execution error
+                if status.get("status_str") == "error":
+                    print(f"[IMAGE-GEN] ComfyUI failed: {prompt_id}")
+
+                    interrupt_comfyui()
+
+                    raise RuntimeError(result)
+
+                # Completed successfully with outputs
+                if result.get("outputs"):
+                    return result
+
+                # Completed successfully without outputs
+                if status.get("completed") is True:
+                    return result
+
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        # User pressed Ctrl+C
+        print()
+        print("[IMAGE-GEN] Manual interrupt requested")
+
+        interrupt_comfyui()
+
+        # Keep KeyboardInterrupt behavior so the caller knows
+        # the generation was manually cancelled.
+        raise
+
+    except Exception as e:
+        # Any unexpected Python/network/etc. failure
+        print(f"[IMAGE-GEN] Waiting for ComfyUI failed: {e}")
+
+        interrupt_comfyui()
+
+        raise
 
 
 def download_image(result, output_path):
@@ -151,7 +189,6 @@ def generate_text_to_image(
 
     # Prompt
     workflow["459_452"]["inputs"]["prompt"] = prompt
-
     # KSampler
     workflow["459_458"]["inputs"]["seed"] = seed
     workflow["459_458"]["inputs"]["steps"] = steps
@@ -173,13 +210,65 @@ def generate_text_to_image(
     )
 
 
+# def generate_image_to_image(
+#     prompt,
+#     image_1,
+#     image_2,
+#     output_path,
+#     image_id,
+#     seed=None,
+#     steps=25,
+#     cfg=2.0,
+#     width=1280,
+#     height=720,
+# ):
+#     with open(
+#         I2I_WORKFLOW_FILE,
+#         "r",
+#         encoding="utf-8",
+#     ) as f:
+#         workflow = json.load(f)
+#
+#     if seed is None:
+#         seed = uuid.uuid4().int % (2**32)
+#
+#     image_1_filename = upload_image(image_1)
+#     image_2_filename = upload_image(image_2)
+#
+#     # Character layout
+#     workflow["477"]["inputs"]["image"] = image_1_filename
+#
+#     # World image
+#     workflow["470"]["inputs"]["image"] = image_2_filename
+#
+#     workflow["459_474"]["inputs"]["prompt"] = prompt
+#
+#     workflow["459_458"]["inputs"]["seed"] = seed
+#     workflow["459_458"]["inputs"]["steps"] = steps
+#     workflow["459_458"]["inputs"]["cfg"] = cfg
+#
+#     workflow["459_456"]["inputs"]["width"] = width
+#     workflow["459_456"]["inputs"]["height"] = height
+#
+#     workflow["479"]["inputs"]["value"] = image_id
+#
+#     prompt_id = submit_workflow(workflow)
+#
+#     result = wait_for_completion(prompt_id)
+#
+#     return download_image(
+#         result,
+#         output_path,
+#     )
+
+
 def generate_image_to_image(
     prompt,
-    image_1,
-    image_2,
+    char_layout_1,
+    char_layout_2,
+    world_image,
     output_path,
     image_id,
-    seed=None,
     steps=25,
     cfg=2.0,
     width=1280,
@@ -192,25 +281,57 @@ def generate_image_to_image(
     ) as f:
         workflow = json.load(f)
 
-    if seed is None:
-        seed = uuid.uuid4().int % (2**32)
+    seed = uuid.uuid4().int % (2**32)
 
-    image_1_filename = upload_image(image_1)
-    image_2_filename = upload_image(image_2)
+    # ==================================================
+    # UPLOAD CHARACTER LAYOUT 1
+    # ==================================================
 
-    # Character layout
+    image_1_filename = upload_image(char_layout_1)
+
+    # ==================================================
+    # UPLOAD CHARACTER LAYOUT 2
+    # ==================================================
+
+    image_2_filename = upload_image(char_layout_2)
+
+    # ==================================================
+    # UPLOAD WORLD IMAGE
+    # ==================================================
+
+    world_filename = upload_image(world_image)
+
+    # ==================================================
+    # SET WORKFLOW IMAGE INPUTS
+    # ==================================================
+
+    # Character layout 1 -> node 477
     workflow["477"]["inputs"]["image"] = image_1_filename
 
-    # World image
-    workflow["470"]["inputs"]["image"] = image_2_filename
+    # Character layout 2 -> node 480
+    workflow["480"]["inputs"]["image"] = image_2_filename
+
+    # World image -> node 470
+    workflow["470"]["inputs"]["image"] = world_filename
+
+    # ==================================================
+    # SET PROMPTS
+    # ==================================================
 
     workflow["459_474"]["inputs"]["prompt"] = prompt
 
+    # ==================================================
+    # SET SAMPLER
+    # ==================================================
+
     workflow["459_458"]["inputs"]["seed"] = seed
+
     workflow["459_458"]["inputs"]["steps"] = steps
+
     workflow["459_458"]["inputs"]["cfg"] = cfg
 
     workflow["459_456"]["inputs"]["width"] = width
+
     workflow["459_456"]["inputs"]["height"] = height
 
     workflow["479"]["inputs"]["value"] = image_id
@@ -243,128 +364,389 @@ def unload_models():
     gc.collect()
 
 
-def create_image_layout(data, generated_temp_images_dir):
+# def create_image_layout(data, generated_temp_images_dir):
+#     if isinstance(data, str):
+#         data = json.loads(data)
+#
+#     columns = 3 if len(data) > 3 else 2
+#
+#     card_width = 300
+#     image_height = 450
+#     info_height = 90
+#
+#     horizontal_gap = 25
+#     vertical_gap = 25
+#     margin = 30
+#
+#     card_height = image_height + info_height
+#
+#     rows = math.ceil(len(data) / columns)
+#
+#     canvas_width = margin * 2 + columns * card_width + (columns - 1) * horizontal_gap
+#
+#     canvas_height = margin * 2 + rows * card_height + (rows - 1) * vertical_gap
+#
+#     canvas = Image.new(
+#         "RGB",
+#         (canvas_width, canvas_height),
+#         "white",
+#     )
+#
+#     draw = ImageDraw.Draw(canvas)
+#
+#     name_font = ImageFont.load_default(size=25)
+#     id_font = ImageFont.load_default(size=25)
+#
+#     for index, item in enumerate(data):
+#         row = index // columns
+#         col = index % columns
+#
+#         x = margin + col * (card_width + horizontal_gap)
+#         y = margin + row * (card_height + vertical_gap)
+#
+#         # Card border
+#         draw.rectangle(
+#             [x, y, x + card_width, y + card_height],
+#             outline="black",
+#             width=2,
+#         )
+#
+#         # Image
+#         image_path = item["image"]
+#
+#         if os.path.exists(image_path):
+#             try:
+#                 image = Image.open(image_path)
+#
+#                 image = fit_image(
+#                     image,
+#                     (card_width, image_height),
+#                 )
+#
+#                 canvas.paste(image, (x, y))
+#
+#             except Exception:
+#                 draw.rectangle(
+#                     [x, y, x + card_width, y + image_height],
+#                     fill="lightgray",
+#                 )
+#
+#         else:
+#             draw.rectangle(
+#                 [x, y, x + card_width, y + image_height],
+#                 fill="lightgray",
+#             )
+#
+#             draw.text(
+#                 (x + card_width // 2, y + image_height // 2),
+#                 "IMAGE NOT FOUND",
+#                 fill="black",
+#                 anchor="mm",
+#             )
+#
+#         # Separator
+#         draw.line(
+#             [x, y + image_height, x + card_width, y + image_height],
+#             fill="black",
+#             width=2,
+#         )
+#
+#         # Name
+#         draw.text(
+#             (x + 15, y + image_height + 15),
+#             str(item.get("name", "")),
+#             fill="black",
+#             font=name_font,
+#         )
+#
+#         # ID
+#         draw.text(
+#             (x + 15, y + image_height + 50),
+#             f"{item.get('id', '')}",
+#             fill="black",
+#             font=id_font,
+#         )
+#
+#     # Save merged image
+#     output_path = generated_temp_images_dir / "char_merge.png"
+#
+#     canvas.save(
+#         output_path,
+#         format="PNG",
+#     )
+#
+#     return output_path
+
+
+def create_image_layout(
+    data,
+    generated_temp_images_dir,
+):
     if isinstance(data, str):
         data = json.loads(data)
 
-    columns = 3 if len(data) > 3 else 2
+    # ==================================================
+    # ALWAYS USE THESE TWO FILENAMES
+    # ==================================================
 
-    card_width = 300
-    image_height = 450
-    info_height = 90
+    layout_1_path = generated_temp_images_dir / "char_merge1.png"
+    layout_2_path = generated_temp_images_dir / "char_merge2.png"
 
-    horizontal_gap = 25
-    vertical_gap = 25
-    margin = 30
+    # ==================================================
+    # NO CHARACTERS
+    # ==================================================
 
-    card_height = image_height + info_height
-
-    rows = math.ceil(len(data) / columns)
-
-    canvas_width = margin * 2 + columns * card_width + (columns - 1) * horizontal_gap
-
-    canvas_height = margin * 2 + rows * card_height + (rows - 1) * vertical_gap
-
-    canvas = Image.new(
-        "RGB",
-        (canvas_width, canvas_height),
-        "white",
-    )
-
-    draw = ImageDraw.Draw(canvas)
-
-    name_font = ImageFont.load_default(size=25)
-    id_font = ImageFont.load_default(size=25)
-
-    for index, item in enumerate(data):
-        row = index // columns
-        col = index % columns
-
-        x = margin + col * (card_width + horizontal_gap)
-        y = margin + row * (card_height + vertical_gap)
-
-        # Card border
-        draw.rectangle(
-            [x, y, x + card_width, y + card_height],
-            outline="black",
-            width=2,
+    if not data:
+        empty_canvas = Image.new(
+            "RGB",
+            (300, 450),
+            "white",
         )
 
-        # Image
-        image_path = item["image"]
+        empty_canvas.save(layout_1_path)
+        empty_canvas.save(layout_2_path)
 
-        if os.path.exists(image_path):
-            try:
-                image = Image.open(image_path)
+        return layout_1_path, layout_2_path
 
-                image = fit_image(
-                    image,
-                    (card_width, image_height),
-                )
+    # ==================================================
+    # SPLIT CHARACTERS AS EQUALLY AS POSSIBLE
+    #
+    # 1 -> 1 + 0
+    # 2 -> 1 + 1
+    # 3 -> 2 + 1
+    # 4 -> 2 + 2
+    # 5 -> 3 + 2
+    # 6 -> 3 + 3
+    # ==================================================
 
-                canvas.paste(image, (x, y))
+    total_chars = len(data)
 
-            except Exception:
+    chars_in_layout_1 = math.ceil(total_chars / 2)
+
+    chunk_1 = data[:chars_in_layout_1]
+    chunk_2 = data[chars_in_layout_1:]
+
+    chunks = [
+        chunk_1,
+        chunk_2,
+    ]
+
+    layout_paths = [
+        layout_1_path,
+        layout_2_path,
+    ]
+
+    # ==================================================
+    # CREATE BOTH LAYOUTS
+    # ==================================================
+
+    for layout_index, chunk in enumerate(chunks):
+        output_path = layout_paths[layout_index]
+
+        # --------------------------------------------------
+        # EMPTY LAYOUT
+        # --------------------------------------------------
+
+        if not chunk:
+            empty_canvas = Image.new(
+                "RGB",
+                (300, 450),
+                "white",
+            )
+
+            empty_canvas.save(output_path)
+
+            continue
+
+        # --------------------------------------------------
+        # LAYOUT SIZE
+        # --------------------------------------------------
+
+        columns = 3 if len(chunk) == 3 else len(chunk)
+
+        card_width = 300
+        image_height = 450
+        info_height = 90
+
+        horizontal_gap = 25
+        vertical_gap = 25
+        margin = 30
+
+        card_height = image_height + info_height
+
+        rows = math.ceil(len(chunk) / columns)
+
+        canvas_width = (
+            margin * 2 + columns * card_width + (columns - 1) * horizontal_gap
+        )
+
+        canvas_height = margin * 2 + rows * card_height + (rows - 1) * vertical_gap
+
+        canvas = Image.new(
+            "RGB",
+            (canvas_width, canvas_height),
+            "white",
+        )
+
+        draw = ImageDraw.Draw(canvas)
+
+        name_font = ImageFont.load_default(size=25)
+        id_font = ImageFont.load_default(size=25)
+
+        # --------------------------------------------------
+        # ADD CHARACTER CARDS
+        # --------------------------------------------------
+
+        for index, item in enumerate(chunk):
+            row = index // columns
+            col = index % columns
+
+            x = margin + col * (card_width + horizontal_gap)
+
+            y = margin + row * (card_height + vertical_gap)
+
+            # Card border
+            draw.rectangle(
+                [
+                    x,
+                    y,
+                    x + card_width,
+                    y + card_height,
+                ],
+                outline="black",
+                width=2,
+            )
+
+            image_path = item["image"]
+
+            if os.path.exists(image_path):
+                try:
+                    image = Image.open(image_path).convert("RGB")
+
+                    image = fit_image(
+                        image,
+                        (card_width, image_height),
+                    )
+
+                    canvas.paste(
+                        image,
+                        (x, y),
+                    )
+
+                except Exception:
+                    draw.rectangle(
+                        [
+                            x,
+                            y,
+                            x + card_width,
+                            y + image_height,
+                        ],
+                        fill="lightgray",
+                    )
+
+            else:
                 draw.rectangle(
-                    [x, y, x + card_width, y + image_height],
+                    [
+                        x,
+                        y,
+                        x + card_width,
+                        y + image_height,
+                    ],
                     fill="lightgray",
                 )
 
-        else:
-            draw.rectangle(
-                [x, y, x + card_width, y + image_height],
-                fill="lightgray",
-            )
+                draw.text(
+                    (
+                        x + card_width // 2,
+                        y + image_height // 2,
+                    ),
+                    "IMAGE NOT FOUND",
+                    fill="black",
+                    anchor="mm",
+                )
 
-            draw.text(
-                (x + card_width // 2, y + image_height // 2),
-                "IMAGE NOT FOUND",
+            # Separator
+            draw.line(
+                [
+                    x,
+                    y + image_height,
+                    x + card_width,
+                    y + image_height,
+                ],
                 fill="black",
-                anchor="mm",
+                width=2,
             )
 
-        # Separator
-        draw.line(
-            [x, y + image_height, x + card_width, y + image_height],
-            fill="black",
-            width=2,
+            # Character name
+            draw.text(
+                (
+                    x + 15,
+                    y + image_height + 15,
+                ),
+                str(item.get("name", "")),
+                fill="black",
+                font=name_font,
+            )
+
+            # Character ID
+            draw.text(
+                (
+                    x + 15,
+                    y + image_height + 50,
+                ),
+                f"{item.get('id', '')}",
+                fill="black",
+                font=id_font,
+            )
+
+        # --------------------------------------------------
+        # SAVE / OVERWRITE
+        # --------------------------------------------------
+
+        canvas.save(output_path)
+
+    return layout_1_path, layout_2_path
+
+
+def create_empty_layout(
+    generated_temp_images_dir,
+    layout_name,
+):
+    placeholder_path = generated_temp_images_dir / f"{layout_name}_empty.png"
+
+    if not placeholder_path.exists():
+        canvas = Image.new(
+            "RGB",
+            (300, 450),
+            "white",
         )
 
-        # Name
-        draw.text(
-            (x + 15, y + image_height + 15),
-            str(item.get("name", "")),
-            fill="black",
-            font=name_font,
-        )
+        canvas.save(placeholder_path)
 
-        # ID
-        draw.text(
-            (x + 15, y + image_height + 50),
-            f"ID: {item.get('id', '')}",
-            fill="black",
-            font=id_font,
-        )
-
-    # Save merged image
-    output_path = generated_temp_images_dir / "char_merge.png"
-
-    canvas.save(
-        output_path,
-        format="PNG",
-    )
-
-    return output_path
+    return placeholder_path
 
 
 def fit_image(image, size):
-    image = image.convert("RGB")
-    image.thumbnail(size, Image.Resampling.LANCZOS)
+    if image.mode != "RGB":
+        image = image.convert("RGB")
 
-    background = Image.new("RGB", size, "white")
+    image.thumbnail(
+        size,
+        Image.Resampling.LANCZOS,
+    )
+
+    background = Image.new(
+        "RGB",
+        size,
+        "white",
+    )
 
     x = (size[0] - image.width) // 2
     y = (size[1] - image.height) // 2
 
-    background.paste(image, (x, y))
+    background.paste(
+        image,
+        (x, y),
+    )
+
     return background

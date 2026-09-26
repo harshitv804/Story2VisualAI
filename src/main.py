@@ -240,7 +240,7 @@ async def main():
         generate_meta_images(
             character_image_prompts,
             generated_char_images_dir,
-            [736, 1280, 1.0, 30],
+            [736, 1280, 1.5, 30],
             "char_id",
         )
 
@@ -248,20 +248,22 @@ async def main():
         generate_meta_images(
             world_image_prompts,
             generated_world_images_dir,
-            [1920, 1024, 1.0, 30],
+            [1920, 1024, 1.5, 30],
             "world_id",
         )
 
         generate_final_scene_images(
             final_image_prompts,
             character_meta,
-            [1920, 1024, 1.0, 30],
+            [1920, 1024, 1.0, 25],
             generated_final_images_dir,
             generated_char_images_dir,
             generated_world_images_dir,
             generated_temp_images_dir,
         )
 
+    del character_image_prompts, world_image_prompts, final_image_prompts
+    gc.collect()
 
 if __name__ == "__main__":
     asyncio.run(main())
