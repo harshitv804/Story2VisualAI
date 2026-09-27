@@ -1,14 +1,32 @@
+import base64
 import gc
 import json
 import math
+import mimetypes
 import os
 import time
 import uuid
 from pathlib import Path
 
 import requests
-from config import *
+from config import (
+    COMFY_URL,
+    I2I_WORKFLOW_FILE,
+    OPENROUTER_API_KEY,
+    OPENROUTER_APP_TITLE,
+    OPENROUTER_IMAGE_MODEL_ID,
+    OPENROUTER_IMAGES_URL,
+    OPENROUTER_SITE_URL,
+    T2I_WORKFLOW_FILE,
+    UNLOAD_WORKFLOW_FILE,
+)
 from PIL import Image, ImageDraw, ImageFont
+
+IMAGE_BACKENDS = ("comfyui", "openrouter")
+
+# Character sheets are portrait, worlds and final scenes are landscape
+PORTRAIT_ASPECT_RATIO = "3:4"
+LANDSCAPE_ASPECT_RATIO = "16:9"
 
 
 def submit_workflow(workflow):
@@ -29,7 +47,7 @@ def submit_workflow(workflow):
 
     prompt_id = data["prompt_id"]
 
-    print("Queued:", prompt_id)
+    print(f"[IMAGE] Queued -> {prompt_id}")
 
     return prompt_id
 
@@ -42,9 +60,8 @@ def interrupt_comfyui():
             timeout=10,
         )
         response.raise_for_status()
-        print("[IMAGE-GEN] ComfyUI job interrupted")
     except requests.RequestException as e:
-        print(f"[IMAGE-GEN] Failed to interrupt ComfyUI: {e}")
+        print(f"[IMAGE-WARN] Failed to interrupt ComfyUI: {e}")
 
 
 def wait_for_completion(prompt_id):
@@ -84,7 +101,6 @@ def wait_for_completion(prompt_id):
 
     except KeyboardInterrupt:
         # User pressed Ctrl+C
-        print()
         print("[IMAGE-GEN] Manual interrupt requested")
 
         interrupt_comfyui()
@@ -210,58 +226,6 @@ def generate_text_to_image(
     )
 
 
-# def generate_image_to_image(
-#     prompt,
-#     image_1,
-#     image_2,
-#     output_path,
-#     image_id,
-#     seed=None,
-#     steps=25,
-#     cfg=2.0,
-#     width=1280,
-#     height=720,
-# ):
-#     with open(
-#         I2I_WORKFLOW_FILE,
-#         "r",
-#         encoding="utf-8",
-#     ) as f:
-#         workflow = json.load(f)
-#
-#     if seed is None:
-#         seed = uuid.uuid4().int % (2**32)
-#
-#     image_1_filename = upload_image(image_1)
-#     image_2_filename = upload_image(image_2)
-#
-#     # Character layout
-#     workflow["477"]["inputs"]["image"] = image_1_filename
-#
-#     # World image
-#     workflow["470"]["inputs"]["image"] = image_2_filename
-#
-#     workflow["459_474"]["inputs"]["prompt"] = prompt
-#
-#     workflow["459_458"]["inputs"]["seed"] = seed
-#     workflow["459_458"]["inputs"]["steps"] = steps
-#     workflow["459_458"]["inputs"]["cfg"] = cfg
-#
-#     workflow["459_456"]["inputs"]["width"] = width
-#     workflow["459_456"]["inputs"]["height"] = height
-#
-#     workflow["479"]["inputs"]["value"] = image_id
-#
-#     prompt_id = submit_workflow(workflow)
-#
-#     result = wait_for_completion(prompt_id)
-#
-#     return download_image(
-#         result,
-#         output_path,
-#     )
-
-
 def generate_image_to_image(
     prompt,
     char_layout_1,
@@ -358,124 +322,226 @@ def unload_models():
     prompt_id = submit_workflow(workflow)
 
     wait_for_completion(prompt_id)
-    print()
     print("[IMAGE-GEN] All models have been unloaded")
 
     gc.collect()
 
 
-# def create_image_layout(data, generated_temp_images_dir):
-#     if isinstance(data, str):
-#         data = json.loads(data)
-#
-#     columns = 3 if len(data) > 3 else 2
-#
-#     card_width = 300
-#     image_height = 450
-#     info_height = 90
-#
-#     horizontal_gap = 25
-#     vertical_gap = 25
-#     margin = 30
-#
-#     card_height = image_height + info_height
-#
-#     rows = math.ceil(len(data) / columns)
-#
-#     canvas_width = margin * 2 + columns * card_width + (columns - 1) * horizontal_gap
-#
-#     canvas_height = margin * 2 + rows * card_height + (rows - 1) * vertical_gap
-#
-#     canvas = Image.new(
-#         "RGB",
-#         (canvas_width, canvas_height),
-#         "white",
-#     )
-#
-#     draw = ImageDraw.Draw(canvas)
-#
-#     name_font = ImageFont.load_default(size=25)
-#     id_font = ImageFont.load_default(size=25)
-#
-#     for index, item in enumerate(data):
-#         row = index // columns
-#         col = index % columns
-#
-#         x = margin + col * (card_width + horizontal_gap)
-#         y = margin + row * (card_height + vertical_gap)
-#
-#         # Card border
-#         draw.rectangle(
-#             [x, y, x + card_width, y + card_height],
-#             outline="black",
-#             width=2,
-#         )
-#
-#         # Image
-#         image_path = item["image"]
-#
-#         if os.path.exists(image_path):
-#             try:
-#                 image = Image.open(image_path)
-#
-#                 image = fit_image(
-#                     image,
-#                     (card_width, image_height),
-#                 )
-#
-#                 canvas.paste(image, (x, y))
-#
-#             except Exception:
-#                 draw.rectangle(
-#                     [x, y, x + card_width, y + image_height],
-#                     fill="lightgray",
-#                 )
-#
-#         else:
-#             draw.rectangle(
-#                 [x, y, x + card_width, y + image_height],
-#                 fill="lightgray",
-#             )
-#
-#             draw.text(
-#                 (x + card_width // 2, y + image_height // 2),
-#                 "IMAGE NOT FOUND",
-#                 fill="black",
-#                 anchor="mm",
-#             )
-#
-#         # Separator
-#         draw.line(
-#             [x, y + image_height, x + card_width, y + image_height],
-#             fill="black",
-#             width=2,
-#         )
-#
-#         # Name
-#         draw.text(
-#             (x + 15, y + image_height + 15),
-#             str(item.get("name", "")),
-#             fill="black",
-#             font=name_font,
-#         )
-#
-#         # ID
-#         draw.text(
-#             (x + 15, y + image_height + 50),
-#             f"{item.get('id', '')}",
-#             fill="black",
-#             font=id_font,
-#         )
-#
-#     # Save merged image
-#     output_path = generated_temp_images_dir / "char_merge.png"
-#
-#     canvas.save(
-#         output_path,
-#         format="PNG",
-#     )
-#
-#     return output_path
+def encode_image(image_path) -> dict:
+    image_path = Path(image_path)
+
+    media_type = mimetypes.guess_type(image_path.name)[0] or "image/png"
+
+    encoded = base64.b64encode(image_path.read_bytes()).decode("utf-8")
+
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:{media_type};base64,{encoded}"},
+    }
+
+
+def save_openrouter_result(response_json, output_path):
+    data = response_json.get("data") or []
+
+    if not data:
+        raise RuntimeError(f"[ERROR] No image returned -> {response_json}")
+
+    image = data[0]
+
+    if image.get("b64_json"):
+        image_bytes = base64.b64decode(image["b64_json"])
+    elif image.get("url"):
+        download = requests.get(image["url"], timeout=120)
+        download.raise_for_status()
+        image_bytes = download.content
+    else:
+        raise RuntimeError(f"[ERROR] Unexpected image payload -> {image}")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(image_bytes)
+
+    return output_path
+
+
+def openrouter_image_request(
+    prompt,
+    output_path,
+    image_id,
+    aspect_ratio,
+    resolution="1K",
+    references=None,
+    n=1,
+):
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError("[ERROR] OPENROUTER_API_KEY is not set")
+
+    if not OPENROUTER_IMAGE_MODEL_ID:
+        raise RuntimeError("[ERROR] OPENROUTER_IMAGE_MODEL_ID is not set")
+
+    payload = {
+        "model": OPENROUTER_IMAGE_MODEL_ID,
+        "prompt": prompt,
+        "resolution": resolution,
+        "aspect_ratio": aspect_ratio,
+        "n": n,
+    }
+
+    if references:
+        payload["input_references"] = references
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    if OPENROUTER_SITE_URL:
+        headers["HTTP-Referer"] = OPENROUTER_SITE_URL
+
+    if OPENROUTER_APP_TITLE:
+        headers["X-Title"] = OPENROUTER_APP_TITLE
+
+    print(
+        f"[IMAGE-API] {image_id}: request -> {OPENROUTER_IMAGE_MODEL_ID} "
+        f"({payload['aspect_ratio']}, {resolution})"
+    )
+
+    response = requests.post(
+        OPENROUTER_IMAGES_URL,
+        headers=headers,
+        data=json.dumps(payload),
+        timeout=900,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"[ERROR] {image_id}: {response.status_code} -> {response.text[:500]}"
+        )
+
+    return save_openrouter_result(response.json(), output_path)
+
+
+def generate_text_to_image_openrouter(
+    prompt,
+    output_path,
+    image_id,
+    aspect_ratio=LANDSCAPE_ASPECT_RATIO,
+    resolution="1K",
+):
+    return openrouter_image_request(
+        prompt,
+        output_path,
+        image_id,
+        aspect_ratio,
+        resolution=resolution,
+    )
+
+
+def generate_image_to_image_openrouter(
+    prompt,
+    char_layout_1,
+    char_layout_2,
+    world_image,
+    output_path,
+    image_id,
+    aspect_ratio=LANDSCAPE_ASPECT_RATIO,
+    resolution="1K",
+):
+    references = [
+        encode_image(path)
+        for path in (
+            char_layout_1,
+            char_layout_2,
+            world_image,
+        )
+    ]
+
+    return openrouter_image_request(
+        prompt,
+        output_path,
+        image_id,
+        aspect_ratio,
+        resolution=resolution,
+        references=references,
+    )
+
+
+def text_to_image(
+    backend,
+    prompt,
+    output_path,
+    image_id,
+    width,
+    height,
+    cfg,
+    steps,
+    aspect_ratio=LANDSCAPE_ASPECT_RATIO,
+    resolution="1K",
+):
+    if backend == "openrouter":
+        return generate_text_to_image_openrouter(
+            prompt,
+            output_path,
+            image_id,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+        )
+
+    return generate_text_to_image(
+        prompt=prompt,
+        output_path=output_path,
+        image_id=image_id,
+        width=width,
+        height=height,
+        cfg=cfg,
+        steps=steps,
+    )
+
+
+def image_to_image(
+    backend,
+    prompt,
+    char_layout_1,
+    char_layout_2,
+    world_image,
+    output_path,
+    image_id,
+    width,
+    height,
+    cfg,
+    steps,
+    aspect_ratio=LANDSCAPE_ASPECT_RATIO,
+    resolution="1K",
+):
+    if backend == "openrouter":
+        return generate_image_to_image_openrouter(
+            prompt=prompt,
+            char_layout_1=char_layout_1,
+            char_layout_2=char_layout_2,
+            world_image=world_image,
+            output_path=output_path,
+            image_id=image_id,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+        )
+
+    return generate_image_to_image(
+        prompt=prompt,
+        char_layout_1=char_layout_1,
+        char_layout_2=char_layout_2,
+        world_image=world_image,
+        output_path=output_path,
+        image_id=image_id,
+        width=width,
+        height=height,
+        cfg=cfg,
+        steps=steps,
+    )
+
+
+def unload_backend(backend):
+    if backend == "comfyui":
+        unload_models()
 
 
 def create_image_layout(
@@ -706,24 +772,6 @@ def create_image_layout(
         canvas.save(output_path)
 
     return layout_1_path, layout_2_path
-
-
-def create_empty_layout(
-    generated_temp_images_dir,
-    layout_name,
-):
-    placeholder_path = generated_temp_images_dir / f"{layout_name}_empty.png"
-
-    if not placeholder_path.exists():
-        canvas = Image.new(
-            "RGB",
-            (300, 450),
-            "white",
-        )
-
-        canvas.save(placeholder_path)
-
-    return placeholder_path
 
 
 def fit_image(image, size):

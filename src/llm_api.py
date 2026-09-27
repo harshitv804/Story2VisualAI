@@ -3,7 +3,7 @@ import json
 from typing import cast
 
 import outlines
-from config import *
+from config import LLM_API_BASE_URL, LLM_API_KEY, LLM_API_MODEL_ID
 from openai import OpenAI as LLM
 from openai.types.chat import (
     ChatCompletion,
@@ -20,7 +20,6 @@ model = outlines.from_openai(client, LLM_API_MODEL_ID)
 
 
 async def repair_output(
-    name: str,
     bad_output,
     output_schema,
 ):
@@ -120,7 +119,6 @@ async def run_model(
                 # Try healing before consuming another
                 # normal generation retry.
                 repaired = await repair_output(
-                    name=name,
                     bad_output=result,
                     output_schema=output_schema,
                 )
@@ -131,7 +129,6 @@ async def run_model(
                 # Repair failed, so continue to the
                 # normal retry loop.
                 raise validation_error
-            print()
             print(f"[DONE] {name}")
 
             return result

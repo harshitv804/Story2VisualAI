@@ -1,18 +1,18 @@
 import argparse
 from pathlib import Path
 
-from helper_fn import check_story_files
+from helper_fn import SUPPORTED_EXTENSIONS, check_story_files
+from image_api import IMAGE_BACKENDS
 
 
 def parse_args():
-
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
         "--story-dir",
         type=str,
         required=True,
-        help="Folder path in which all the assests created by the program will be stored",
+        help="Folder in which all the assets created by the program are stored",
     )
 
     parser.add_argument(
@@ -26,7 +26,7 @@ def parse_args():
         "--replace",
         action="store_true",
         default=False,
-        help="Delete all existing the existing assets and regenerate fresh",
+        help="Delete all existing assets and regenerate them fresh",
     )
 
     parser.add_argument(
@@ -34,6 +34,13 @@ def parse_args():
         action="store_true",
         default=False,
         help="Skip the image generation stage",
+    )
+
+    parser.add_argument(
+        "--image-backend",
+        choices=IMAGE_BACKENDS,
+        default="comfyui",
+        help="Image generation backend (comfyui or openrouter)",
     )
 
     parser.add_argument(
@@ -54,11 +61,12 @@ def parse_args():
 
     if not input_dir.is_dir():
         raise FileNotFoundError(f"[ERROR] Input directory does not exist: {input_dir}")
-    else:
-        if not check_story_files(input_dir):
-            raise FileNotFoundError(
-                f"[ERROR] No supported input files {('.txt', '.pdf', '.md', '.docx', '.html', '.epub')} found in: {input_dir}"
-            )
+
+    if not check_story_files(input_dir):
+        extensions = ", ".join(sorted(SUPPORTED_EXTENSIONS))
+        raise FileNotFoundError(
+            f"[ERROR] No supported input files ({extensions}) found in: {input_dir}"
+        )
 
     if not prompts_dir.is_dir():
         raise FileNotFoundError(

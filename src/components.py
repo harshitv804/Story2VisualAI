@@ -5,10 +5,12 @@ from pathlib import Path
 import pydantic_models as pyd
 from helper_fn import has_json_data, read_md
 from image_api import (
+    IMAGE_BACKENDS,
+    LANDSCAPE_ASPECT_RATIO,
     create_image_layout,
-    generate_image_to_image,
-    generate_text_to_image,
-    unload_models,
+    image_to_image,
+    text_to_image,
+    unload_backend,
 )
 from llm_api import run_model
 
@@ -51,6 +53,7 @@ async def story_validation(
             result.model_dump_json(indent=2),
             encoding="utf-8",
         )
+
     if result is None:
         raise RuntimeError("[ERROR] Story validation failed after retries.")
 
@@ -70,9 +73,11 @@ async def generate_meta_stage1(
     check_existing: bool = True,
     save_output: bool = True,
     dependent_paths: list[Path] | None = None,
+    log: bool = True,
 ):
-    print()
-    print(f"[STEP] Generate {name}:")
+    if log:
+        print()
+        print(f"[STEP] Generate {name}:")
 
     result = None
 
@@ -80,7 +85,8 @@ async def generate_meta_stage1(
         for dependent_path in dependent_paths:
             if dependent_path.exists():
                 dependent_path.unlink()
-                print(f"[DELETE] Dependent file -> '{dependent_path}'")
+                if log:
+                    print(f"[DELETE] Dependent file -> '{dependent_path}'")
 
     # Reuse existing output only when requested
     if check_existing and output_path.exists() and not replace:
@@ -88,13 +94,15 @@ async def generate_meta_stage1(
             existing = json.loads(output_path.read_text(encoding="utf-8"))
 
             if has_json_data(existing):
-                print(f"[SKIP] {name} already exists -> '{output_path}'")
+                if log:
+                    print(f"[SKIP] {name} already exists -> '{output_path}'")
                 result = output_schema.model_validate(existing)
-            else:
+            elif log:
                 print(f"[INFO] {name} is empty, regenerating -> '{output_path}'")
 
         except Exception as e:
-            print(f"[WARN] Failed to load existing {name}: {e}")
+            if log:
+                print(f"[WARN] Failed to load existing {name}: {e}")
 
     if result is None:
         prompt_template = read_md(prompts_path)
@@ -151,10 +159,9 @@ async def generate_meta_stage2(
     if result is None:
         result = pyd.SubSceneMetadata()
         for i, scene in enumerate(input_json.scenes):
+            total = len(input_json.scenes)
             print()
-            print(
-                f"[STEP] Generate subscenes {i + 1}/{len(input_json.scenes)}: {scene.scene_id}"
-            )
+            print(f"[STEP] Generate subscenes {i + 1}/{total}: {scene.scene_id}")
 
             # Previous scene
             prev_scene = input_json.scenes[i - 1] if i > 0 else None
@@ -180,6 +187,7 @@ async def generate_meta_stage2(
                 prompts_path,
                 check_existing=False,
                 save_output=False,
+                log=False,
             )
 
             result.subscenes.extend(scene_result.subscenes or [])
@@ -255,6 +263,7 @@ async def generate_meta_stage3(
                 prompts_path,
                 check_existing=False,
                 save_output=False,
+                log=False,
             )
 
             # Accumulate generated ingredients
@@ -287,67 +296,85 @@ async def generate_meta_stage4(
     print()
     print(f"[STEP] Generate {name}:")
 
-    result = None
+    result = list_schema(prompts=[])
 
     if output_path.exists() and not replace:
         try:
             existing = json.loads(output_path.read_text(encoding="utf-8"))
 
-            if has_json_data(existing):
-                print(f"[SKIP] {name} already exists -> '{output_path}'")
-
-                result = list_schema.model_validate(existing)
-
-            else:
-                print(f"[INFO] {name} is empty, regenerating -> '{output_path}'")
+            result = list_schema.model_validate(existing)
 
         except Exception as e:
             print(f"[WARN] Failed to load existing {name}: {e}")
+            result = list_schema(prompts=[])
 
-    if result is None:
-        result = list_schema(prompts=[])
+    order = {getattr(item, id_field): i for i, item in enumerate(items)}
 
-        for i, item in enumerate(items):
-            item_id = getattr(
-                item,
-                id_field,
-            )
-
-            print()
-            print(f"[STEP] Generate image prompt ({i + 1}/{len(items)}): {item_id}")
-
-            item_json = item.model_dump_json(indent=2)
-
-            inputs = {
-                **context_inputs,
-                meta_variable: item_json,
-            }
-
-            generated = await generate_meta_stage1(
-                name,
-                inputs,
-                output_path,
-                output_schema,
-                prompts_path,
-                check_existing=False,
-                save_output=False,
-            )
-
-            final_prompt = item_schema(
-                **{
-                    id_field: item_id,
-                    "image_prompt": generated.image_prompt,
-                }
-            )
-
-            result.prompts.append(final_prompt)
-
+    def save_progress() -> None:
+        result.prompts = [
+            entry for entry in result.prompts if getattr(entry, id_field) in order
+        ]
+        result.prompts.sort(
+            key=lambda entry: order[getattr(entry, id_field)],
+        )
         output_path.write_text(
             result.model_dump_json(indent=2),
             encoding="utf-8",
         )
 
-        print(f"[SAVE] Image prompt -> '{output_path}'")
+    completed_ids = {getattr(entry, id_field) for entry in result.prompts}
+
+    pending = [
+        item for item in items if getattr(item, id_field) not in completed_ids
+    ]
+
+    if completed_ids:
+        print(f"[RESUME] {len(completed_ids)}/{len(items)} already done")
+
+    if not pending:
+        save_progress()
+        print(f"[SKIP] {name} -> '{output_path}'")
+        return result
+
+    for i, item in enumerate(pending):
+        item_id = getattr(
+            item,
+            id_field,
+        )
+
+        print()
+        print(f"[STEP] Generate image prompt ({i + 1}/{len(pending)}): {item_id}")
+
+        item_json = item.model_dump_json(indent=2)
+
+        inputs = {
+            **context_inputs,
+            meta_variable: item_json,
+        }
+
+        generated = await generate_meta_stage1(
+            name,
+            inputs,
+            output_path,
+            output_schema,
+            prompts_path,
+            check_existing=False,
+            save_output=False,
+            log=False,
+        )
+
+        final_prompt = item_schema(
+            **{
+                id_field: item_id,
+                "image_prompt": generated.image_prompt,
+            }
+        )
+
+        result.prompts.append(final_prompt)
+
+        save_progress()
+
+    print(f"[SAVE] {name} {len(result.prompts)}/{len(items)} -> '{output_path}'")
 
     return result
 
@@ -367,26 +394,17 @@ async def generate_meta_stage5(
     print()
     print("[STEP] Generate final image prompts:")
 
+    result = pyd.FinalImagePromptList()
+
     if final_img_meta_path.exists() and not replace:
         try:
             existing = json.loads(final_img_meta_path.read_text(encoding="utf-8"))
 
-            if has_json_data(existing):
-                print(
-                    f"[SKIP] Final image prompts already exist "
-                    f"-> '{final_img_meta_path}'"
-                )
-
-                return pyd.FinalImagePromptList.model_validate(existing)
-
-            else:
-                print(
-                    f"[INFO] Final image prompts are empty, "
-                    f"regenerating -> '{final_img_meta_path}'"
-                )
+            result = pyd.FinalImagePromptList.model_validate(existing)
 
         except Exception as e:
             print(f"[WARN] Failed to load existing final image prompts: {e}")
+            result = pyd.FinalImagePromptList()
 
     subscenes = {
         subscene.scene_id: subscene for subscene in (subscene_meta.subscenes or [])
@@ -398,16 +416,45 @@ async def generate_meta_stage5(
 
     worlds = {world.world_id: world for world in (world_meta.worlds or [])}
 
-    result = pyd.FinalImagePromptList()
-
     ingredients = scene_requirements.ingredients
 
-    for i, ingredient in enumerate(ingredients):
+    # Keep the output ordered like the requirements it was built from
+    order = {ingredient.scene_id: i for i, ingredient in enumerate(ingredients)}
+
+    def save_progress() -> None:
+        result.results = [
+            entry for entry in result.results if entry.subscene_id in order
+        ]
+        result.results.sort(
+            key=lambda entry: order[entry.subscene_id],
+        )
+        final_img_meta_path.write_text(
+            result.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+
+    completed_ids = {item.subscene_id for item in result.results}
+
+    pending = [
+        ingredient
+        for ingredient in ingredients
+        if ingredient.scene_id not in completed_ids
+    ]
+
+    if completed_ids:
+        print(f"[RESUME] {len(completed_ids)}/{len(ingredients)} already done")
+
+    if not pending:
+        save_progress()
+        print(f"[SKIP] final_image_prompts -> '{final_img_meta_path}'")
+        return result
+
+    for i, ingredient in enumerate(pending):
         item_id = ingredient.scene_id
 
         print(
             f"[STEP] Generate final image prompt "
-            f"({i + 1}/{len(ingredients)}): {item_id}"
+            f"({i + 1}/{len(pending)}): {item_id}"
         )
 
         scene = subscenes[item_id]
@@ -444,6 +491,7 @@ async def generate_meta_stage5(
             prompts_dir,
             check_existing=False,
             save_output=False,
+            log=False,
         )
 
         result.results.append(
@@ -455,12 +503,12 @@ async def generate_meta_stage5(
             )
         )
 
-    final_img_meta_path.write_text(
-        result.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
+        save_progress()
 
-    print(f"[SAVE] Final image prompt -> '{final_img_meta_path}'")
+    print(
+        f"[SAVE] final_image_prompts "
+        f"{len(result.results)}/{len(ingredients)} -> '{final_img_meta_path}'"
+    )
 
     return result
 
@@ -470,8 +518,10 @@ def generate_meta_images(
     output_dir,
     image_params: list,
     id_field: str,
+    backend: str = "comfyui",
+    aspect_ratio: str = LANDSCAPE_ASPECT_RATIO,
+    resolution: str = "1K",
 ):
-
     image_width, image_height, image_guidance, image_steps = image_params
 
     for item in prompts.prompts:
@@ -481,15 +531,14 @@ def generate_meta_images(
         out_path = output_dir / f"{item_id}.png"
 
         if out_path.exists():
-            print()
-            print(f"[IMAGE-SKIP] {item_id} already exists -> {out_path}")
+            print(f"[IMAGE-SKIP] {item_id} already exists -> '{out_path}'")
             continue
 
         try:
-            print()
             print(f"[IMAGE-GEN] {item_id}")
 
-            generate_text_to_image(
+            text_to_image(
+                backend,
                 prompt=prompt_text,
                 output_path=out_path,
                 image_id=item_id,
@@ -497,110 +546,16 @@ def generate_meta_images(
                 height=image_height,
                 cfg=image_guidance,
                 steps=image_steps,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
             )
-            print()
             print(f"[IMAGE-SAVED] {item_id} -> '{out_path}'")
 
         except Exception as e:
-            print()
             print(f"[IMAGE-ERROR] {item_id} failed: {e}")
 
         finally:
             gc.collect()
-
-
-# def generate_final_scene_images(
-#     final_image_prompts,
-#     character_meta,
-#     image_params,
-#     generated_final_images_dir,
-#     generated_char_images_dir,
-#     generated_world_images_dir,
-#     generated_temp_images_dir,
-# ):
-#
-#     image_width, image_height, image_guidance, image_steps = image_params
-#
-#     # char_id -> Character
-#     characters = {char.char_id: char for char in (character_meta.characters or [])}
-#
-#     for item in final_image_prompts.results:
-#         subscene_id = item.subscene_id
-#         char_ids = item.char_ids or []
-#         world_id = item.world_id
-#         prompt_text = item.image_prompt.image_prompt
-#
-#         final_image_path = generated_final_images_dir / f"{subscene_id}.png"
-#
-#         if final_image_path.exists():
-#             print()
-#             print(f"[FINAL] Skipping {subscene_id} (already exists)")
-#             continue
-#
-#         try:
-#             char_data_for_layout = []
-#
-#             for cid in char_ids:
-#                 char = characters.get(cid)
-#
-#                 if char is None:
-#                     print()
-#                     print(f"[FINAL-WARN] Character {cid} not found for {subscene_id}")
-#                     continue
-#
-#                 img_path = generated_char_images_dir / f"{cid}.png"
-#
-#                 if not img_path.exists():
-#                     print()
-#                     print(f"[FINAL-WARN] Character image missing: {img_path}")
-#                     continue
-#
-#                 char_data_for_layout.append(
-#                     {
-#                         "image": img_path,
-#                         "name": char.name,
-#                         "id": char.char_id,
-#                     }
-#                 )
-#
-#             layout_path = create_image_layout(
-#                 char_data_for_layout,
-#                 generated_temp_images_dir,
-#             )
-#             print()
-#             print(f"[FINAL] Layout created for {subscene_id}: {layout_path}")
-#
-#             world_image_path = generated_world_images_dir / f"{world_id}.png"
-#
-#             if not world_image_path.exists():
-#                 print()
-#                 print(f"[FINAL-WARN] World image missing: {world_image_path}")
-#                 continue
-#
-#             print(f"[FINAL] World image: {world_image_path}")
-#
-#             generate_image_to_image(
-#                 prompt=prompt_text,
-#                 image_1=layout_path,
-#                 image_2=world_image_path,
-#                 output_path=final_image_path,
-#                 image_id=subscene_id,
-#                 width=image_width,
-#                 height=image_height,
-#                 cfg=image_guidance,
-#                 steps=image_steps,
-#             )
-#             print(f"[FINAL-SAVED] {subscene_id} -> '{final_image_path}'")
-#             print()
-#
-#         except Exception as e:
-#             print()
-#             print(f"[FINAL-ERROR] {subscene_id} failed: {e}")
-#
-#         finally:
-#             gc.collect()
-#
-#     unload_models()
 
 
 def generate_final_scene_images(
@@ -611,12 +566,17 @@ def generate_final_scene_images(
     generated_char_images_dir,
     generated_world_images_dir,
     generated_temp_images_dir,
+    backend: str = "comfyui",
+    aspect_ratio: str = LANDSCAPE_ASPECT_RATIO,
+    resolution: str = "1K",
 ):
-
     image_width, image_height, image_guidance, image_steps = image_params
 
     # char_id -> Character
     characters = {char.char_id: char for char in (character_meta.characters or [])}
+
+    generated = []
+    failed = []
 
     for item in final_image_prompts.results:
         subscene_id = item.subscene_id
@@ -627,29 +587,23 @@ def generate_final_scene_images(
         final_image_path = generated_final_images_dir / f"{subscene_id}.png"
 
         if final_image_path.exists():
-            print()
-            print(f"[FINAL] Skipping {subscene_id} (already exists)")
+            print(f"[FINAL-SKIP] {subscene_id} (already exists)")
             continue
 
         try:
-            # ==================================================
             # BUILD CHARACTER DATA
-            # ==================================================
-
             char_data_for_layout = []
 
             for cid in char_ids:
                 char = characters.get(cid)
 
                 if char is None:
-                    print()
                     print(f"[FINAL-WARN] Character {cid} not found for {subscene_id}")
                     continue
 
                 img_path = generated_char_images_dir / f"{cid}.png"
 
                 if not img_path.exists():
-                    print()
                     print(f"[FINAL-WARN] Character image missing: {img_path}")
                     continue
 
@@ -661,54 +615,27 @@ def generate_final_scene_images(
                     }
                 )
 
-            # ==================================================
-            # CREATE CHARACTER LAYOUTS
-            #
-            # 1-3 characters:
-            #
-            #   layout_paths[0] = characters 1-3
-            #   layout_paths[1] = white placeholder
-            #
-            # 4-6 characters:
-            #
-            #   layout_paths[0] = characters 1-3
-            #   layout_paths[1] = characters 4-6
-            # ==================================================
-
             char_layout_1, char_layout_2 = create_image_layout(
                 char_data_for_layout,
                 generated_temp_images_dir,
             )
 
-            print()
-            print(f"[FINAL] Character layout 1: {char_layout_1}")
+            print(f"[FINAL] Layouts: {char_layout_1} | {char_layout_2}")
 
-            print(f"[FINAL] Character layout 2: {char_layout_2}")
-
-            # ==================================================
             # WORLD IMAGE
-            # ==================================================
-
             world_image_path = generated_world_images_dir / f"{world_id}.png"
 
             if not world_image_path.exists():
-                print()
                 print(f"[FINAL-WARN] World image missing: {world_image_path}")
+                failed.append(subscene_id)
                 continue
 
-            print(f"[FINAL] World image: {world_image_path}")
-
-            # ==================================================
             # GENERATE FINAL IMAGE
-            # ==================================================
-
-            generate_image_to_image(
+            image_to_image(
+                backend,
                 prompt=prompt_text,
-                # Character layout 1
                 char_layout_1=char_layout_1,
-                # Character layout 2
                 char_layout_2=char_layout_2,
-                # World image
                 world_image=world_image_path,
                 output_path=final_image_path,
                 image_id=subscene_id,
@@ -716,17 +643,30 @@ def generate_final_scene_images(
                 height=image_height,
                 cfg=image_guidance,
                 steps=image_steps,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
             )
+
+            generated.append(subscene_id)
 
             print(f"[FINAL-SAVED] {subscene_id} -> '{final_image_path}'")
 
-            print()
-
         except Exception as e:
-            print()
             print(f"[FINAL-ERROR] {subscene_id} failed: {e}")
+            failed.append(subscene_id)
 
         finally:
             gc.collect()
 
-    unload_models()
+    total = len(final_image_prompts.results)
+
+    print()
+    print(
+        f"[FINAL-DONE] {len(generated)} generated, "
+        f"{total - len(generated) - len(failed)} skipped"
+    )
+
+    if failed:
+        print(f"[FINAL-MISSING] {len(failed)}: {', '.join(failed)}")
+
+    unload_backend(backend)
