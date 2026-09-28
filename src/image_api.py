@@ -14,7 +14,10 @@ from config import (
     I2I_WORKFLOW_FILE,
     OPENROUTER_API_KEY,
     OPENROUTER_APP_TITLE,
+    OPENROUTER_IMAGE_BACKGROUND,
     OPENROUTER_IMAGE_MODEL_ID,
+    OPENROUTER_IMAGE_OUTPUT_FORMAT,
+    OPENROUTER_IMAGE_QUALITY,
     OPENROUTER_IMAGES_URL,
     OPENROUTER_SITE_URL,
     T2I_WORKFLOW_FILE,
@@ -45,11 +48,7 @@ def submit_workflow(workflow):
     if "error" in data:
         raise RuntimeError(data)
 
-    prompt_id = data["prompt_id"]
-
-    print(f"[IMAGE] Queued -> {prompt_id}")
-
-    return prompt_id
+    return data["prompt_id"]
 
 
 def interrupt_comfyui():
@@ -216,6 +215,11 @@ def generate_text_to_image(
 
     workflow["462"]["inputs"]["value"] = image_id
 
+    print(
+        f"[IMAGE-API] {image_id}: request -> comfyui "
+        f"({width}x{height}, cfg {cfg}, steps {steps})"
+    )
+
     prompt_id = submit_workflow(workflow)
 
     result = wait_for_completion(prompt_id)
@@ -300,6 +304,11 @@ def generate_image_to_image(
 
     workflow["479"]["inputs"]["value"] = image_id
 
+    print(
+        f"[IMAGE-API] {image_id}: request -> comfyui "
+        f"({width}x{height}, cfg {cfg}, steps {steps}, 3 references)"
+    )
+
     prompt_id = submit_workflow(workflow)
 
     result = wait_for_completion(prompt_id)
@@ -319,10 +328,12 @@ def unload_models():
     ) as f:
         workflow = json.load(f)
 
+    print("[IMAGE-API] unload: request -> comfyui")
+
     prompt_id = submit_workflow(workflow)
 
     wait_for_completion(prompt_id)
-    print("[IMAGE-GEN] All models have been unloaded")
+    print("[IMAGE-API] unload: models unloaded")
 
     gc.collect()
 
@@ -385,6 +396,9 @@ def openrouter_image_request(
         "resolution": resolution,
         "aspect_ratio": aspect_ratio,
         "n": n,
+        "quality": OPENROUTER_IMAGE_QUALITY,
+        "output_format": OPENROUTER_IMAGE_OUTPUT_FORMAT,
+        "background": OPENROUTER_IMAGE_BACKGROUND,
     }
 
     if references:
@@ -478,6 +492,12 @@ def text_to_image(
     aspect_ratio=LANDSCAPE_ASPECT_RATIO,
     resolution="1K",
 ):
+    if backend not in IMAGE_BACKENDS:
+        raise ValueError(
+            f"[ERROR] Unknown image backend '{backend}' "
+            f"(expected one of {', '.join(IMAGE_BACKENDS)})"
+        )
+
     if backend == "openrouter":
         return generate_text_to_image_openrouter(
             prompt,
@@ -513,6 +533,12 @@ def image_to_image(
     aspect_ratio=LANDSCAPE_ASPECT_RATIO,
     resolution="1K",
 ):
+    if backend not in IMAGE_BACKENDS:
+        raise ValueError(
+            f"[ERROR] Unknown image backend '{backend}' "
+            f"(expected one of {', '.join(IMAGE_BACKENDS)})"
+        )
+
     if backend == "openrouter":
         return generate_image_to_image_openrouter(
             prompt=prompt,

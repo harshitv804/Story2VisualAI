@@ -26,7 +26,7 @@ def preprocess_input(
     replace: bool = False,
 ) -> None:
     if output_path.exists() and not replace:
-        print(f"[SKIP] Using existing processed input -> '{output_path}'")
+        print("[SKIP] Using existing processed input")
         return
 
     md = MarkItDown()

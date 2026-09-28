@@ -31,7 +31,7 @@ async def story_validation(
         and not replace
         and story_valid_path.read_text(encoding="utf-8").strip()
     ):
-        print(f"[SKIP] Story validation already exists -> '{story_valid_path}'")
+        print("[SKIP] Story validation already exists")
 
         try:
             existing = json.loads(story_valid_path.read_text(encoding="utf-8"))
@@ -95,7 +95,7 @@ async def generate_meta_stage1(
 
             if has_json_data(existing):
                 if log:
-                    print(f"[SKIP] {name} already exists -> '{output_path}'")
+                    print(f"[SKIP] {name} already exists")
                 result = output_schema.model_validate(existing)
             elif log:
                 print(f"[INFO] {name} is empty, regenerating -> '{output_path}'")
@@ -148,7 +148,7 @@ async def generate_meta_stage2(
             existing = json.loads(output_path.read_text(encoding="utf-8"))
 
             if has_json_data(existing):
-                print(f"[SKIP] {name} already exists -> '{output_path}'")
+                print(f"[SKIP] {name} already exists")
                 result = output_schema.model_validate(existing)
             else:
                 print(f"[INFO] {name} is empty, regenerating -> '{output_path}'")
@@ -220,7 +220,7 @@ async def generate_meta_stage3(
             existing = json.loads(output_path.read_text(encoding="utf-8"))
 
             if has_json_data(existing):
-                print(f"[SKIP] {name} already exists -> '{output_path}'")
+                print(f"[SKIP] {name} already exists")
 
                 result = pyd.SceneIngredientsList.model_validate(existing)
             else:
@@ -333,7 +333,7 @@ async def generate_meta_stage4(
 
     if not pending:
         save_progress()
-        print(f"[SKIP] {name} -> '{output_path}'")
+        print(f"[SKIP] {name} already exists")
         return result
 
     for i, item in enumerate(pending):
@@ -446,7 +446,7 @@ async def generate_meta_stage5(
 
     if not pending:
         save_progress()
-        print(f"[SKIP] final_image_prompts -> '{final_img_meta_path}'")
+        print("[SKIP] final_image_prompts already exists")
         return result
 
     for i, ingredient in enumerate(pending):
@@ -518,11 +518,17 @@ def generate_meta_images(
     output_dir,
     image_params: list,
     id_field: str,
-    backend: str = "comfyui",
+    backend: str,
     aspect_ratio: str = LANDSCAPE_ASPECT_RATIO,
     resolution: str = "1K",
 ):
     image_width, image_height, image_guidance, image_steps = image_params
+
+    label = output_dir.name
+
+    generated = []
+    skipped = []
+    failed = []
 
     for item in prompts.prompts:
         item_id = getattr(item, id_field)
@@ -531,12 +537,11 @@ def generate_meta_images(
         out_path = output_dir / f"{item_id}.png"
 
         if out_path.exists():
-            print(f"[IMAGE-SKIP] {item_id} already exists -> '{out_path}'")
+            print(f"[IMAGE-SKIP] {item_id} already exists")
+            skipped.append(item_id)
             continue
 
         try:
-            print(f"[IMAGE-GEN] {item_id}")
-
             text_to_image(
                 backend,
                 prompt=prompt_text,
@@ -550,12 +555,23 @@ def generate_meta_images(
                 resolution=resolution,
             )
             print(f"[IMAGE-SAVED] {item_id} -> '{out_path}'")
+            generated.append(item_id)
 
         except Exception as e:
             print(f"[IMAGE-ERROR] {item_id} failed: {e}")
+            failed.append(item_id)
 
         finally:
             gc.collect()
+
+    total = len(prompts.prompts)
+
+    print(
+        f"[IMAGE-DONE] {label}: {len(generated)} generated, {len(skipped)} skipped"
+    )
+
+    if failed:
+        print(f"[IMAGE-MISSING] {len(failed)}: {', '.join(failed)}")
 
 
 def generate_final_scene_images(
@@ -566,7 +582,7 @@ def generate_final_scene_images(
     generated_char_images_dir,
     generated_world_images_dir,
     generated_temp_images_dir,
-    backend: str = "comfyui",
+    backend: str,
     aspect_ratio: str = LANDSCAPE_ASPECT_RATIO,
     resolution: str = "1K",
 ):
@@ -620,7 +636,7 @@ def generate_final_scene_images(
                 generated_temp_images_dir,
             )
 
-            print(f"[FINAL] Layouts: {char_layout_1} | {char_layout_2}")
+            print(f"[FINAL] {subscene_id}: layouts ready")
 
             # WORLD IMAGE
             world_image_path = generated_world_images_dir / f"{world_id}.png"

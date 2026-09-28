@@ -259,7 +259,7 @@ async def main():
         generate_final_scene_images(
             final_image_prompts,
             character_meta,
-            [1920, 1024, 1.0, 25],
+            [1920, 1024, 1.5, 25],
             generated_final_images_dir,
             generated_char_images_dir,
             generated_world_images_dir,

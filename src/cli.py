@@ -39,7 +39,7 @@ def parse_args():
     parser.add_argument(
         "--image-backend",
         choices=IMAGE_BACKENDS,
-        default="comfyui",
+        required=True,
         help="Image generation backend (comfyui or openrouter)",
     )
 
