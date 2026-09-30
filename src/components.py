@@ -1,9 +1,14 @@
 import gc
 import json
+import re
 from pathlib import Path
 
 import pydantic_models as pyd
-from helper_fn import has_json_data, read_md
+from helper_fn import (
+    has_json_data,
+    import_legacy_progress,
+    read_md,
+)
 from image_api import (
     IMAGE_BACKENDS,
     LANDSCAPE_ASPECT_RATIO,
@@ -129,6 +134,47 @@ async def generate_meta_stage1(
     return result
 
 
+async def generate_item(
+    name: str,
+    inputs: dict[str, str],
+    output_path: Path,
+    output_schema,
+    prompts_path: Path,
+):
+    """One LLM call for a single item of a stage."""
+
+    return await generate_meta_stage1(
+        name,
+        inputs,
+        output_path,
+        output_schema,
+        prompts_path,
+        check_existing=False,
+        save_output=False,
+        log=False,
+    )
+
+
+def parent_scene_id(subscene_id: str) -> str:
+    """Group id of a subscene: S1A -> S1, S12C -> S12.
+
+    Returns the id unchanged when it carries no trailing letter suffix.
+    """
+
+    match = re.match(r"^(.*?)[A-Z]+$", subscene_id)
+
+    return match.group(1) if match else subscene_id
+
+
+def report_failures(name: str, failed: list[str]):
+    if not failed:
+        return
+
+    print()
+    print(f"[FAILED] {name}: {len(failed)} item(s) -> {', '.join(failed)}")
+    print("[HINT] Re-run the same command to retry only these items")
+
+
 async def generate_meta_stage2(
     name: str,
     input_json,
@@ -140,43 +186,69 @@ async def generate_meta_stage2(
     print()
     print(f"[STEP] Generate {name}:")
 
-    result = None
+    scenes = input_json.scenes
 
-    # Reuse existing output only if JSON actually contains data
+    total = len(scenes)
+
+    result = pyd.SubSceneMetadata(subscenes=[])
+
+    done = set()
+
+    # Subscenes carry no parent id, so completed scenes are tracked in the
+    # stage output itself under 'scenes_done'
     if output_path.exists() and not replace:
         try:
             existing = json.loads(output_path.read_text(encoding="utf-8"))
 
             if has_json_data(existing):
-                print(f"[SKIP] {name} already exists")
-                result = output_schema.model_validate(existing)
+                checkpoint = pyd.SubSceneCheckpoint.model_validate(existing)
+
+                result = pyd.SubSceneMetadata(subscenes=checkpoint.subscenes)
+                done = set(checkpoint.scenes_done)
             else:
-                print(f"[INFO] {name} is empty, regenerating -> '{output_path}'")
+                print(f"[INFO] {name} is empty, regenerating")
 
         except Exception as e:
             print(f"[WARN] Failed to load existing {name}: {e}")
 
-    if result is None:
-        result = pyd.SubSceneMetadata()
-        for i, scene in enumerate(input_json.scenes):
-            total = len(input_json.scenes)
-            print()
-            print(f"[STEP] Generate subscenes {i + 1}/{total}: {scene.scene_id}")
+    done |= import_legacy_progress(output_path)
 
-            # Previous scene
-            prev_scene = input_json.scenes[i - 1] if i > 0 else None
+    pending = [
+        (index, scene)
+        for index, scene in enumerate(scenes, start=1)
+        if scene.scene_id not in done
+    ]
 
-            prev_scene_json = (
-                prev_scene.model_dump_json(indent=2)
-                if prev_scene is not None
-                else "None"
-            )
+    if done:
+        print(f"[RESUME] {len(done)}/{total} already done")
 
-            # Current scene
-            current_scene_json = scene.model_dump_json(indent=2)
+    if not pending:
+        print(f"[SKIP] {name} already exists")
+        return result
 
-            # Generate metadata for this scene
-            scene_result = await generate_meta_stage1(
+    failed = []
+
+    for index, scene in pending:
+        print()
+        print(
+            f"[STEP] Generate subscenes "
+            f"({index}/{total}): {scene.scene_id}"
+        )
+
+        # Previous scene
+        prev_scene = scenes[index - 2] if index > 1 else None
+
+        prev_scene_json = (
+            prev_scene.model_dump_json(indent=2)
+            if prev_scene is not None
+            else "None"
+        )
+
+        # Current scene
+        current_scene_json = scene.model_dump_json(indent=2)
+
+        try:
+            scene_result = await generate_item(
                 name,
                 {
                     "PREV_SCENE": prev_scene_json,
@@ -185,18 +257,35 @@ async def generate_meta_stage2(
                 output_path,
                 output_schema,
                 prompts_path,
-                check_existing=False,
-                save_output=False,
-                log=False,
             )
+        except Exception as e:
+            print(f"[ERROR] {scene.scene_id} failed: {e}")
+            failed.append(scene.scene_id)
+            continue
 
-            result.subscenes.extend(scene_result.subscenes or [])
+        result.subscenes.extend(scene_result.subscenes or [])
+
+        done.add(scene.scene_id)
 
         output_path.write_text(
-            result.model_dump_json(indent=2),
+            pyd.SubSceneCheckpoint(
+                subscenes=result.subscenes,
+                scenes_done=sorted(done),
+            ).model_dump_json(indent=2),
             encoding="utf-8",
         )
-        print(f"[SAVE] Subscenes metadata -> '{output_path}'")
+
+        print(f"[SAVE] subscenes ({index}/{total})")
+
+    print(f"[SAVE] {name} {len(result.subscenes)} subscenes -> '{output_path}'")
+
+    if failed:
+        report_failures(name, failed)
+        raise RuntimeError(
+            f"[ERROR] {name} incomplete: {len(failed)} scene(s) failed. "
+            f"Progress saved, re-run to continue."
+        )
+
     return result
 
 
@@ -212,7 +301,11 @@ async def generate_meta_stage3(
     print()
     print(f"[STEP] Generate {name}:")
 
-    result = None
+    subscenes = subscene_meta.subscenes
+
+    total = len(subscenes)
+
+    result = pyd.SceneIngredientsList(ingredients=[])
 
     # Reuse existing output only if JSON actually contains data
     if output_path.exists() and not replace:
@@ -220,62 +313,149 @@ async def generate_meta_stage3(
             existing = json.loads(output_path.read_text(encoding="utf-8"))
 
             if has_json_data(existing):
-                print(f"[SKIP] {name} already exists")
-
                 result = pyd.SceneIngredientsList.model_validate(existing)
             else:
-                print(f"[INFO] {name} is empty, regenerating -> '{output_path}'")
+                print(f"[INFO] {name} is empty, regenerating")
 
         except Exception as e:
             print(f"[WARN] Failed to load existing {name}: {e}")
 
-    if result is None:
-        result = pyd.SceneIngredientsList(ingredients=[])
+    order = {subscene.scene_id: i for i, subscene in enumerate(subscenes)}
 
-        for i, subscene in enumerate(subscene_meta.subscenes):
-            print()
-            print(
-                f"[STEP] Generate scene ingredients "
-                f"({i + 1}/{len(subscene_meta.subscenes)}): "
-                f"{subscene.scene_id}"
-            )
+    subscenes_by_id = {subscene.scene_id: subscene for subscene in subscenes}
 
-            # Current subscene only
-            subscene_json = json.dumps(
-                {
-                    "subscene_id": subscene.scene_id,
-                    "subscene_desc": subscene.scene_desc,
-                },
-                indent=2,
-            )
+    # Previous subscene within the same parent scene, for continuity.
+    # S1B -> S1C, and the first subscene of a scene has no predecessor.
+    prev_subscene_id = {}
 
-            # Shared context + current subscene
-            inputs = {
-                **context_inputs,
-                "SUBSCENES": subscene_json,
-            }
+    last_in_group = {}
 
-            scene_result = await generate_meta_stage1(
-                name,
-                inputs,
-                output_path,
-                output_schema,
-                prompts_path,
-                check_existing=False,
-                save_output=False,
-                log=False,
-            )
+    for subscene in subscenes:
+        group = parent_scene_id(subscene.scene_id)
 
-            # Accumulate generated ingredients
-            result.ingredients.extend(scene_result.ingredients or [])
+        prev_subscene_id[subscene.scene_id] = last_in_group.get(group)
 
-        # Incremental save
+        last_in_group[group] = subscene.scene_id
+
+    def ingredients_by_id() -> dict:
+        return {entry.scene_id: entry for entry in result.ingredients}
+
+    def flush() -> None:
+        # One entry per subscene; a duplicated id keeps the latest result
+        latest = {entry.scene_id: entry for entry in result.ingredients}
+
+        result.ingredients = [
+            latest[scene_id]
+            for scene_id in sorted(latest, key=lambda sid: order[sid])
+            if scene_id in order
+        ]
         output_path.write_text(
             result.model_dump_json(indent=2),
             encoding="utf-8",
         )
 
-        print(f"[SAVE] Scene ingredients -> '{output_path}'")
+    subscene_ids = {subscene.scene_id for subscene in subscenes}
+
+    done = {
+        ingredient.scene_id
+        for ingredient in result.ingredients
+        if ingredient.scene_id in subscene_ids
+    }
+
+    pending = [
+        (index, subscene)
+        for index, subscene in enumerate(subscenes, start=1)
+        if subscene.scene_id not in done
+    ]
+
+    if done:
+        print(f"[RESUME] {len(done)}/{total} already done")
+
+    if not pending:
+        flush()
+        print(f"[SKIP] {name} already exists")
+        return result
+
+    failed = []
+
+    for index, subscene in pending:
+        print()
+        print(
+            f"[STEP] Generate scene ingredients "
+            f"({index}/{total}): {subscene.scene_id}"
+        )
+
+        # Current subscene only
+        current_subscene_json = json.dumps(
+            {
+                "scene_id": subscene.scene_id,
+                "scene_desc": subscene.scene_desc,
+            },
+            indent=2,
+        )
+
+        # Preceding subscene of the same parent scene, plus its ingredients
+        prev_id = prev_subscene_id[subscene.scene_id]
+
+        prev_subscene = subscenes_by_id.get(prev_id) if prev_id else None
+
+        prev_ingredient = (
+            ingredients_by_id().get(prev_id) if prev_id else None
+        )
+
+        # Shared context + current subscene + continuity reference
+        inputs = {
+            **context_inputs,
+            "CURRENT_SUBSCENE": current_subscene_json,
+            "PREV_SUBSCENE": (
+                prev_subscene.model_dump_json(indent=2)
+                if prev_subscene is not None
+                else "None"
+            ),
+            "PREV_INGREDIENTS": (
+                prev_ingredient.model_dump_json(indent=2)
+                if prev_ingredient is not None
+                else "None"
+            ),
+        }
+
+        try:
+            scene_result = await generate_item(
+                name,
+                inputs,
+                output_path,
+                output_schema,
+                prompts_path,
+            )
+        except Exception as e:
+            print(f"[ERROR] {subscene.scene_id} failed: {e}")
+            failed.append(subscene.scene_id)
+            continue
+
+        # Accumulate generated ingredients, keyed to the requested subscene
+        for entry in scene_result.ingredients or []:
+            if entry.scene_id != subscene.scene_id:
+                print(
+                    f"[WARN] {subscene.scene_id}: got scene_id "
+                    f"'{entry.scene_id}', relabelled"
+                )
+                entry.scene_id = subscene.scene_id
+
+            result.ingredients.append(entry)
+
+        # Incremental save
+        flush()
+
+        print(f"[SAVE] ingredients ({index}/{total})")
+
+    print(f"[SAVE] {name} {len(result.ingredients)} items -> '{output_path}'")
+
+    if failed:
+        report_failures(name, failed)
+        raise RuntimeError(
+            f"[ERROR] {name} incomplete: {len(failed)} subscene(s) failed. "
+            f"Progress saved, re-run to continue."
+        )
 
     return result
 
@@ -310,7 +490,7 @@ async def generate_meta_stage4(
 
     order = {getattr(item, id_field): i for i, item in enumerate(items)}
 
-    def save_progress() -> None:
+    def flush() -> None:
         result.prompts = [
             entry for entry in result.prompts if getattr(entry, id_field) in order
         ]
@@ -332,9 +512,11 @@ async def generate_meta_stage4(
         print(f"[RESUME] {len(completed_ids)}/{len(items)} already done")
 
     if not pending:
-        save_progress()
+        flush()
         print(f"[SKIP] {name} already exists")
         return result
+
+    failed = []
 
     for i, item in enumerate(pending):
         item_id = getattr(
@@ -352,16 +534,18 @@ async def generate_meta_stage4(
             meta_variable: item_json,
         }
 
-        generated = await generate_meta_stage1(
-            name,
-            inputs,
-            output_path,
-            output_schema,
-            prompts_path,
-            check_existing=False,
-            save_output=False,
-            log=False,
-        )
+        try:
+            generated = await generate_item(
+                name,
+                inputs,
+                output_path,
+                output_schema,
+                prompts_path,
+            )
+        except Exception as e:
+            print(f"[ERROR] {item_id} failed: {e}")
+            failed.append(item_id)
+            continue
 
         final_prompt = item_schema(
             **{
@@ -372,9 +556,16 @@ async def generate_meta_stage4(
 
         result.prompts.append(final_prompt)
 
-        save_progress()
+        flush()
 
     print(f"[SAVE] {name} {len(result.prompts)}/{len(items)} -> '{output_path}'")
+
+    if failed:
+        report_failures(name, failed)
+        raise RuntimeError(
+            f"[ERROR] {name} incomplete: {len(failed)} item(s) failed. "
+            f"Progress saved, re-run to continue."
+        )
 
     return result
 
@@ -394,7 +585,7 @@ async def generate_meta_stage5(
     print()
     print("[STEP] Generate final image prompts:")
 
-    result = pyd.FinalImagePromptList()
+    result = pyd.FinalImagePromptList(results=[])
 
     if final_img_meta_path.exists() and not replace:
         try:
@@ -404,7 +595,7 @@ async def generate_meta_stage5(
 
         except Exception as e:
             print(f"[WARN] Failed to load existing final image prompts: {e}")
-            result = pyd.FinalImagePromptList()
+            result = pyd.FinalImagePromptList(results=[])
 
     subscenes = {
         subscene.scene_id: subscene for subscene in (subscene_meta.subscenes or [])
@@ -421,7 +612,7 @@ async def generate_meta_stage5(
     # Keep the output ordered like the requirements it was built from
     order = {ingredient.scene_id: i for i, ingredient in enumerate(ingredients)}
 
-    def save_progress() -> None:
+    def flush() -> None:
         result.results = [
             entry for entry in result.results if entry.subscene_id in order
         ]
@@ -445,9 +636,11 @@ async def generate_meta_stage5(
         print(f"[RESUME] {len(completed_ids)}/{len(ingredients)} already done")
 
     if not pending:
-        save_progress()
+        flush()
         print("[SKIP] final_image_prompts already exists")
         return result
+
+    failed = []
 
     for i, ingredient in enumerate(pending):
         item_id = ingredient.scene_id
@@ -465,34 +658,36 @@ async def generate_meta_stage5(
 
         world = worlds[ingredient.world]
 
-        output_prompt = await generate_meta_stage1(
-            "final_image_prompt",
-            {
-                "SCENE_DESC": json.dumps(
-                    scene.model_dump(),
-                    indent=2,
-                ),
-                "CHAR_METADATA": json.dumps(
-                    [char.model_dump() for char in chars],
-                    indent=2,
-                ),
-                "WORLD_METADATA": json.dumps(
-                    world.model_dump(),
-                    indent=2,
-                ),
-                "PROPS_METADATA": json.dumps(
-                    [prop.model_dump() for prop in props_list],
-                    indent=2,
-                ),
-                "STORY_STYLE": story_meta.story_style,
-            },
-            final_img_meta_path,
-            pyd.ImagePrompt,
-            prompts_dir,
-            check_existing=False,
-            save_output=False,
-            log=False,
-        )
+        try:
+            output_prompt = await generate_item(
+                "final_image_prompt",
+                {
+                    "SCENE_DESC": json.dumps(
+                        scene.model_dump(),
+                        indent=2,
+                    ),
+                    "CHAR_METADATA": json.dumps(
+                        [char.model_dump() for char in chars],
+                        indent=2,
+                    ),
+                    "WORLD_METADATA": json.dumps(
+                        world.model_dump(),
+                        indent=2,
+                    ),
+                    "PROPS_METADATA": json.dumps(
+                        [prop.model_dump() for prop in props_list],
+                        indent=2,
+                    ),
+                    "STORY_STYLE": story_meta.story_style,
+                },
+                final_img_meta_path,
+                pyd.ImagePrompt,
+                prompts_dir,
+            )
+        except Exception as e:
+            print(f"[ERROR] {item_id} failed: {e}")
+            failed.append(item_id)
+            continue
 
         result.results.append(
             pyd.FinalImagePrompt(
@@ -503,12 +698,20 @@ async def generate_meta_stage5(
             )
         )
 
-        save_progress()
+        flush()
 
     print(
         f"[SAVE] final_image_prompts "
         f"{len(result.results)}/{len(ingredients)} -> '{final_img_meta_path}'"
     )
+
+    if failed:
+        report_failures("final_image_prompts", failed)
+        raise RuntimeError(
+            f"[ERROR] final_image_prompts incomplete: "
+            f"{len(failed)} subscene(s) failed. "
+            f"Progress saved, re-run to continue."
+        )
 
     return result
 

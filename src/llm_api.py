@@ -88,6 +88,42 @@ Return the repaired JSON only.
     return output_schema.model_validate_json(content)
 
 
+def coerce_plain_text(raw_output, output_schema):
+    """Wrap a single-field text schema around a plain text model response."""
+
+    if not isinstance(raw_output, str):
+        return None
+
+    text = raw_output.strip()
+
+    if text.startswith("```"):
+        text = "\n".join(
+            line
+            for line in text.splitlines()
+            if not line.strip().startswith("```")
+        ).strip()
+
+        try:
+            return output_schema.model_validate_json(text)
+        except Exception:
+            pass
+
+    if not text:
+        return None
+
+    fields = output_schema.model_fields
+
+    if len(fields) != 1:
+        return None
+
+    field_name, field = next(iter(fields.items()))
+
+    if field.annotation is not str:
+        return None
+
+    return output_schema(**{field_name: text})
+
+
 async def run_model(
     name: str,
     prompt: str,
@@ -114,6 +150,12 @@ async def run_model(
                 result = output_schema.model_validate_json(result)
 
             except Exception as validation_error:
+                coerced = coerce_plain_text(result, output_schema)
+
+                if coerced is not None:
+                    print(f"[COERCE] {name}: wrapped plain text output")
+                    return coerced
+
                 print(f"[VALIDATION-ERROR] {name}: {validation_error}")
                 print("[REPAIR] Trying to repair the invalid Output")
                 # Try healing before consuming another

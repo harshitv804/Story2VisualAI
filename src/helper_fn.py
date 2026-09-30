@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from markitdown import MarkItDown
@@ -102,6 +103,29 @@ def load_processed_input(input_file_path: Path) -> str:
 def read_md(path: Path) -> str:
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+def legacy_progress_path(output_path: Path) -> Path:
+    return output_path.with_name(f"{output_path.stem}.progress{output_path.suffix}")
+
+
+def import_legacy_progress(output_path: Path) -> set:
+    """Move ids from the old sidecar file into the stage output, then drop it."""
+
+    path = legacy_progress_path(output_path)
+
+    if not path.exists():
+        return set()
+
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        done = set(existing.get("done", []))
+    except Exception:
+        done = set()
+
+    path.unlink()
+
+    return done
 
 
 def has_json_data(value) -> bool:

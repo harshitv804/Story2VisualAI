@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel, Field
 
@@ -22,7 +22,7 @@ class Character(BaseModel):
 
 
 class CharacterMetadata(BaseModel):
-    characters: Optional[List[Character]] = None
+    characters: List[Character]
 
 
 class Prop(BaseModel):
@@ -32,7 +32,7 @@ class Prop(BaseModel):
 
 
 class PropMetadata(BaseModel):
-    props: Optional[List[Prop]] = None
+    props: List[Prop]
 
 
 class World(BaseModel):
@@ -42,7 +42,7 @@ class World(BaseModel):
 
 
 class WorldMetadata(BaseModel):
-    worlds: Optional[List[World]] = None
+    worlds: List[World]
 
 
 class Scene(BaseModel):
@@ -51,7 +51,7 @@ class Scene(BaseModel):
 
 
 class SceneMetadata(BaseModel):
-    scenes: Optional[List[Scene]] = None
+    scenes: List[Scene]
 
 
 class SubScene(BaseModel):
@@ -60,7 +60,13 @@ class SubScene(BaseModel):
 
 
 class SubSceneMetadata(BaseModel):
-    subscenes: List[SubScene] = Field(default_factory=list)
+    subscenes: List[SubScene]
+
+
+class SubSceneCheckpoint(SubSceneMetadata):
+    """On-disk form, also tracks which parent scenes are already generated."""
+
+    scenes_done: List[str] = Field(default_factory=list)
 
 
 class SceneIngredient(BaseModel):
@@ -104,4 +110,4 @@ class FinalImagePrompt(BaseModel):
 
 
 class FinalImagePromptList(BaseModel):
-    results: list[FinalImagePrompt] = []
+    results: List[FinalImagePrompt]
