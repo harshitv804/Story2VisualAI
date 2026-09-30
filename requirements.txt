@@ -1,0 +1,23 @@
+# Story2VisualAI — runtime dependencies
+# Tested on Python 3.12 (3.10+ should work).
+# Install: pip install -r requirements.txt
+
+# LLM reasoning / structured output against any OpenAI-compatible endpoint.
+# The [openai] extra is required for outlines.from_openai (see llm_api.py).
+openai==2.29.0
+outlines[openai]==1.3.3
+
+# Schema validation for every pipeline stage.
+pydantic==2.12.5
+
+# Reads .env.config / .env.secrets.
+python-dotenv==1.2.2
+
+# Turns .txt/.md/.pdf/.docx/.html/.epub/.pptx into plain text.
+markitdown[all]==0.1.5
+
+# ComfyUI workflow submission (image backend) + OpenRouter image requests.
+requests==2.33.1
+
+# Character/world image compositing and storyboard page rendering.
+pillow==12.3.0
