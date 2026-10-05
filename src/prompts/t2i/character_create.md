@@ -1,40 +1,42 @@
-# CINEMATIC ANIME IMAGE PROMPT
+# Character → Base Reference Image Prompt
 
-Role: expert cinematic anime prompt writer. Output ONE production-ready cinematic anime image prompt.
+Your task: generate ONE image-generation prompt for the **canonical base reference image** of a character — a reusable, stable anime character-sheet asset for later scene-generation workflows, never a story scene.
 
-## REFERENCE MAP (authoritative — never swap)
-- <image1> = CHARACTER REFERENCE
-- <image2> = CHARACTER REFERENCE
-- <image3> = WORLD / ENVIRONMENT REFERENCE
+Given the fields `character` (`{{CHAR_META}}` — `name`, `role`, `char_desc`), `story_style` (`{{STORY_STYLE}}`), and `synopsis` (`{{SYNOPSIS}}` — context only), produce the field `image_prompt`.
 
-Never read <image3> as a character ref; never read <image1>/<image2> as environment refs. Translate everything from all three refs into anime visual language — never carry over photo/realistic rendering.
+## Output Field
+`image_prompt` = a single block of purely positive, affirmative descriptive text, directly usable by Flux 2 Klean. Output ONLY the prompt — no JSON, no headings, no analysis, no negative-prompt section.
 
-## STYLE LOCK
-Anime only. Express via {STORY_STYLE}: mature cinematic anime illustration, anime character design, anime facial structure + acting, anime anatomy/proportions, controlled linework, cel or soft anime-compatible shading, cinematic lighting, detailed environments, rich controlled color, cinematic depth, expressive appropriate acting, unified direction across characters/props/environment.
-Banned: photorealism, live action, photography, hyperrealism, 3D CGI, western cartoon, comic-book realism, painterly realism, generic digital art, semi-real non-anime illustration.
+## Rules
 
-## SECTIONS (exact headings, exact order)
-#VISUAL STYLE — anime-only aesthetic shaped by {STORY_STYLE}: period, cultural language, rendering, color, emotional tone.
-#CHARACTERS — one entry per visible character, in {CHAR_METADATA} order; never reorder, merge, omit, or rename. Format: ### [NAME] — [ID]
-- Description: identity, role, age, body type, personality-defining traits, persistent characteristics.
-- Visual Appearance: face/facial structure, hair style/shape/length/color, eye shape/color, skin tone, age appearance, body type/proportions, clothing + colors, footwear, accessories, distinctive traits, identifying marks, design cues — sourced from <image1>/<image2>.
-- Current State and Action: expression, emotion, pose, body language, condition, scene position, facing, hands/arms, legs/body, char↔char and char↔prop interaction, the exact frozen moment.
-Keep metadata intact — no shortening for brevity. Persistent traits stay consistent.
-#SCENE AND ACTION — specific frozen cinematic moment from {SCENE_DESC}: location, what is happening, immediate prior beat, central dramatic event, per-character action/movement/body language, environmental activity, key objects, spatial relationships, cause→effect. Characters per <image1>/<image2>; world per <image3>.
-#PROPS AND OBJECT — per {PROPS_METADATA} and scene: identity, shape, size, material, color, texture, design, condition/wear, markings, position, orientation, relationship to characters, usage. Preserve recurring props; believable scale, perspective, contact, placement; props belong to the <image3> world unless scene/metadata says otherwise.
-#CHARACTER INTERACTION AND COMPOSITION — foreground/middle/background, order, spacing, relative scale, facing, body orientation, eye-lines, physical contact, char↔char and char↔object interaction, primary + secondary focal points, hierarchy, leading lines, diagonals, balance, depth, overlap, subject↔environment relationship. Correct anatomy, scale, perspective, weight, contact shadows. No floating characters, broken limbs, impossible intersections, warped perspective, pasted-on look — a professionally staged cinematic anime frame.
-#ENVIRONMENT AND WORLD — <image3> is primary: location, architecture, layout, furniture, doors, windows, walls, floors, ceilings, décor, terrain, background structures, materials, objects, perspective, spatial geometry, color relationships, atmosphere, light direction, camera-to-environment relation. Characters must genuinely inhabit it; no redesign, relocation, replacement, reconstruction, or modernization unless {SCENE_DESC} requires it.
+1. **Medium is always anime.** Hand-drawn anime/manga: flat cel shading, clean linework, stylized anime proportions and facial features. Let `story_style` tune only the rendering treatment — e.g. dark crime → mature cinematic anime, restrained linework, realistic proportions; fantasy → expressive eyes, elaborate rendering; period → muted palette, delicate linework; modern action → sharper linework, strong cel shading. Anime stays the underlying medium regardless of genre.
 
-## CONTINUITY
-Names, IDs, order, identity, age, body type, face, hair, eyes, skin, clothing, accessories, distinctive traits follow <image1> + <image2> + {CHAR_METADATA}. No redesigns, no unexplained trait changes, consistent anime rendering throughout.
+2. **Identity = `char_desc`.** Preserve every stated attribute exactly: age, gender, build, proportions, face shape, eye color, hair, skin tone, facial hair, scars/tattoos, canonical clothing, defining accessories. Fill genuine gaps minimally from role, occupation, synopsis, period, and setting — coherent canon, minimal invention.
 
-# INPUTS
-SCENE: {{SCENE_DESC}}
-CHARACTERS: {{CHAR_METADATA}}
-WORLD: {{WORLD_METADATA}}
-PROPS: {{PROPS_METADATA}}
-STORY STYLE: {{STORY_STYLE}}
-IMAGES: <image1> = CHARACTER · <image2> = CHARACTER · <image3> = WORLD/ENVIRONMENT
+3. **Composition: full-body head-to-toe reference pose.** Head, hair, shoulders, arms, hands, torso, legs, and feet all fully visible; the entire figure centered with clean space around the silhouette. Upright standing, relaxed shoulders, arms resting at the sides or slightly apart, hands open and empty, weight balanced, facing the viewer. Natural eye-level straight-on or slight three-quarter view, standard undistorted lens, true-to-life proportions.
 
-# OUTPUT
-Return only {"image_prompt": "<prompt>"} and nothing else. Inside image_prompt: the six #SECTIONS above, in order, as one cohesive highly detailed cinematic anime prompt. No analysis, reasoning, JSON, explanations, alternate versions, metadata, user-facing instructions, or separate negative-prompt section. Character order always follows {CHAR_METADATA}. Reference mapping never swaps.
+4. **Expression & condition.** A calm baseline expression matching the character's settled personality (permanent defining traits only, never a plot-moment emotion). Canonical everyday clothing in pristine, settled condition — fully visible, clearly rendered, period-appropriate. Accessories limited to those canonically named, kept recognizable.
+
+5. **Background, lighting, isolation.** A completely bare, seamless pure white studio backdrop filling the entire frame; the character evenly and brightly lit from all sides, floating gently just above the white surface, blending seamlessly into it at the point of contact. A single solitary figure, cleanly isolated, occupying most of the vertical frame. Soft, even, neutral studio lighting preserving the face, skin/hair colors, clothing details, and silhouette — a calm character-sheet presentation, never a cinematic scene.
+
+6. **Positive-only phrasing.** Describe only what IS present, being fully explicit so nothing is left to exclude. Never use "no", "not", "without", "avoid", "excluding", "free of", "absent of". Translate exclusions affirmatively: → "a completely bare, seamless pure white studio backdrop"; → "a single solitary character standing alone, the only figure present"; → "the entire figure shown fully in frame, from the crown of the head to the soles of both feet"; → "evenly and brightly lit, blending seamlessly into the white surface".
+
+## Prompt order (replace slots with real content)
+Anime character reference portrait of [NAME] → full-body head-to-toe view → canonical physical appearance → face & hair → distinctive features → canonical clothing → canonical accessories → personality-consistent neutral expression → neutral reference pose → anime style derived from story_style → period aesthetic → soft even studio lighting → clean silhouette → pure white seamless background → isolated solitary figure → centered composition → entire figure fully visible head to toe → high character-detail consistency → professional character reference sheet aesthetic.
+
+## Self-check before output
+Anime medium, treatment reflects `story_style`, matches `char_desc`, full-body incl. feet, face clear, neutral pose & identity-consistent expression, canonical clothing & accessories, seamless pure white backdrop, solitary figure, everyday condition, zero negation words anywhere, one reusable prompt only.
+
+## Input
+```text
+character:
+{{CHAR_META}}
+
+story_style:
+{{STORY_STYLE}}
+
+synopsis:
+{{SYNOPSIS}}
+```
+
+Generate the final `image_prompt` now.

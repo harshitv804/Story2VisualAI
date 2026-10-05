@@ -320,6 +320,13 @@ async def generate_meta_stage3(
         except Exception as e:
             print(f"[WARN] Failed to load existing {name}: {e}")
 
+    # scene_id -> ingredient. Single source of truth for both the
+    # continuity lookups below and the checkpoint written by flush();
+    # result.ingredients is derived from it on every flush.
+    ingredients_by_id = {
+        entry.scene_id: entry for entry in result.ingredients
+    }
+
     order = {subscene.scene_id: i for i, subscene in enumerate(subscenes)}
 
     subscenes_by_id = {subscene.scene_id: subscene for subscene in subscenes}
@@ -337,16 +344,11 @@ async def generate_meta_stage3(
 
         last_in_group[group] = subscene.scene_id
 
-    def ingredients_by_id() -> dict:
-        return {entry.scene_id: entry for entry in result.ingredients}
-
     def flush() -> None:
         # One entry per subscene; a duplicated id keeps the latest result
-        latest = {entry.scene_id: entry for entry in result.ingredients}
-
         result.ingredients = [
-            latest[scene_id]
-            for scene_id in sorted(latest, key=lambda sid: order[sid])
+            ingredients_by_id[scene_id]
+            for scene_id in sorted(ingredients_by_id, key=lambda sid: order[sid])
             if scene_id in order
         ]
         output_path.write_text(
@@ -400,7 +402,7 @@ async def generate_meta_stage3(
         prev_subscene = subscenes_by_id.get(prev_id) if prev_id else None
 
         prev_ingredient = (
-            ingredients_by_id().get(prev_id) if prev_id else None
+            ingredients_by_id.get(prev_id) if prev_id else None
         )
 
         # Shared context + current subscene + continuity reference
@@ -441,7 +443,7 @@ async def generate_meta_stage3(
                 )
                 entry.scene_id = subscene.scene_id
 
-            result.ingredients.append(entry)
+            ingredients_by_id[entry.scene_id] = entry
 
         # Incremental save
         flush()
@@ -766,8 +768,6 @@ def generate_meta_images(
 
         finally:
             gc.collect()
-
-    total = len(prompts.prompts)
 
     print(
         f"[IMAGE-DONE] {label}: {len(generated)} generated, {len(skipped)} skipped"

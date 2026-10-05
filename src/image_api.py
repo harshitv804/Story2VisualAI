@@ -574,9 +574,6 @@ def create_image_layout(
     data,
     generated_temp_images_dir,
 ):
-    if isinstance(data, str):
-        data = json.loads(data)
-
     # ==================================================
     # ALWAYS USE THESE TWO FILENAMES
     # ==================================================
