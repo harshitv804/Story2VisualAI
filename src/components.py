@@ -10,7 +10,6 @@ from helper_fn import (
     read_md,
 )
 from image_api import (
-    IMAGE_BACKENDS,
     LANDSCAPE_ASPECT_RATIO,
     create_image_layout,
     image_to_image,
