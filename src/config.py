@@ -1,9 +1,20 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(".env.secrets")
-load_dotenv(".env.config")
+_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load(name):
+    path = _ROOT / name
+    if not path.is_file():
+        path = Path(name)
+    load_dotenv(path, override=False)
+
+
+_load(".env.secrets")
+_load(".env.config")
 
 if not os.getenv("LLM_API_KEY"):
     raise ValueError("LLM_API_KEY is not set")

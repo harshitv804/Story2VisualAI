@@ -240,7 +240,7 @@ async def main():
         generate_meta_images(
             character_image_prompts,
             generated_char_images_dir,
-            [736, 1280, 1.5, 30],
+            [736, 1280, 1.0, 30],
             "char_id",
             backend=args.image_backend,
             aspect_ratio=PORTRAIT_ASPECT_RATIO,
@@ -250,7 +250,7 @@ async def main():
         generate_meta_images(
             world_image_prompts,
             generated_world_images_dir,
-            [1920, 1024, 1.5, 30],
+            [1920, 1024, 1.0, 30],
             "world_id",
             backend=args.image_backend,
             aspect_ratio=LANDSCAPE_ASPECT_RATIO,
@@ -259,7 +259,7 @@ async def main():
         generate_final_scene_images(
             final_image_prompts,
             character_meta,
-            [1920, 1024, 1.5, 25],
+            [1920, 1024, 1.0, 25],
             generated_final_images_dir,
             generated_char_images_dir,
             generated_world_images_dir,

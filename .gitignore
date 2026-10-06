@@ -8,3 +8,6 @@ __pycache__/
 *.py[cod]
 src/prompts copy/
 requirements-freeze.txt
+.venv
+AGENTS.md
+stories

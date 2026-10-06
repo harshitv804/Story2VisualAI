@@ -251,28 +251,16 @@ def generate_image_to_image(
 
     seed = uuid.uuid4().int % (2**32)
 
-    # ==================================================
     # UPLOAD CHARACTER LAYOUT 1
-    # ==================================================
-
     image_1_filename = upload_image(char_layout_1)
 
-    # ==================================================
     # UPLOAD CHARACTER LAYOUT 2
-    # ==================================================
-
     image_2_filename = upload_image(char_layout_2)
 
-    # ==================================================
     # UPLOAD WORLD IMAGE
-    # ==================================================
-
     world_filename = upload_image(world_image)
 
-    # ==================================================
     # SET WORKFLOW IMAGE INPUTS
-    # ==================================================
-
     # Character layout 1 -> node 477
     workflow["477"]["inputs"]["image"] = image_1_filename
 
@@ -282,16 +270,10 @@ def generate_image_to_image(
     # World image -> node 470
     workflow["470"]["inputs"]["image"] = world_filename
 
-    # ==================================================
     # SET PROMPTS
-    # ==================================================
-
     workflow["459_474"]["inputs"]["prompt"] = prompt
 
-    # ==================================================
     # SET SAMPLER
-    # ==================================================
-
     workflow["459_458"]["inputs"]["seed"] = seed
 
     workflow["459_458"]["inputs"]["steps"] = steps
@@ -574,17 +556,12 @@ def create_image_layout(
     data,
     generated_temp_images_dir,
 ):
-    # ==================================================
+    
     # ALWAYS USE THESE TWO FILENAMES
-    # ==================================================
-
     layout_1_path = generated_temp_images_dir / "char_merge1.png"
     layout_2_path = generated_temp_images_dir / "char_merge2.png"
 
-    # ==================================================
     # NO CHARACTERS
-    # ==================================================
-
     if not data:
         empty_canvas = Image.new(
             "RGB",
@@ -597,16 +574,13 @@ def create_image_layout(
 
         return layout_1_path, layout_2_path
 
-    # ==================================================
     # SPLIT CHARACTERS AS EQUALLY AS POSSIBLE
-    #
     # 1 -> 1 + 0
     # 2 -> 1 + 1
     # 3 -> 2 + 1
     # 4 -> 2 + 2
     # 5 -> 3 + 2
     # 6 -> 3 + 3
-    # ==================================================
 
     total_chars = len(data)
 
@@ -625,17 +599,11 @@ def create_image_layout(
         layout_2_path,
     ]
 
-    # ==================================================
     # CREATE BOTH LAYOUTS
-    # ==================================================
-
     for layout_index, chunk in enumerate(chunks):
         output_path = layout_paths[layout_index]
 
-        # --------------------------------------------------
         # EMPTY LAYOUT
-        # --------------------------------------------------
-
         if not chunk:
             empty_canvas = Image.new(
                 "RGB",
@@ -647,10 +615,7 @@ def create_image_layout(
 
             continue
 
-        # --------------------------------------------------
         # LAYOUT SIZE
-        # --------------------------------------------------
-
         columns = 3 if len(chunk) == 3 else len(chunk)
 
         card_width = 300
@@ -682,10 +647,7 @@ def create_image_layout(
         name_font = ImageFont.load_default(size=25)
         id_font = ImageFont.load_default(size=25)
 
-        # --------------------------------------------------
         # ADD CHARACTER CARDS
-        # --------------------------------------------------
-
         for index, item in enumerate(chunk):
             row = index // columns
             col = index % columns
@@ -788,10 +750,7 @@ def create_image_layout(
                 font=id_font,
             )
 
-        # --------------------------------------------------
         # SAVE / OVERWRITE
-        # --------------------------------------------------
-
         canvas.save(output_path)
 
     return layout_1_path, layout_2_path
