@@ -9,5 +9,4 @@ __pycache__/
 src/prompts copy/
 requirements-freeze.txt
 .venv
-AGENTS.md
 stories
